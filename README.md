@@ -346,6 +346,14 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST $API/auth/logout \
 
 Reusar `$ANA_REFRESH` (ya rotado) o `$NEW_REFRESH` (revocado por el logout) responde `401 INVALID_REFRESH_TOKEN`.
 
+### Colección de Postman
+
+`postman/accounts-api.postman_collection.json` automatiza este mismo recorrido (registro, login con guardado de tokens, cuentas, consulta, recarga, transferencia e historial, más casos de error y refresh/logout). Impórtala en Postman (*Import*) y ejecútala con *Run collection*; no requiere configurar nada más que `baseUrl` si la API no está en `http://localhost:3000`. Las instrucciones están en la descripción de la colección. También se puede correr por consola:
+
+```bash
+npx newman run postman/accounts-api.postman_collection.json
+```
+
 ---
 
 ## 8. Arquitectura y estructura del proyecto
@@ -1045,6 +1053,7 @@ Logs: cada petición registra método, ruta, estado y duración. **Nunca** se re
 
 | Documento | Ubicación | Contenido |
 |---|---|---|
+| `postman/accounts-api.postman_collection.json` | Este repositorio | Colección de Postman con pruebas automáticas del flujo completo |
 | `PLAN-DE-TRABAJO.md` | Este repositorio | Iteraciones, tareas, mediciones y estado del proyecto |
 | `VERIFICACION-INTEROPERABILIDAD.md` | Este repositorio | Pruebas que cubren cada regla I-01 a I-15 |
 | `openapi.yaml` | Carpeta superior | Contrato HTTP formal (esquemas, códigos y ejemplos) |

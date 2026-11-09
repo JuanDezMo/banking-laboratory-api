@@ -1,0 +1,1924 @@
+{
+  "info": {
+    "name": "Accounts API (Go) – laboratorio bancario",
+    "description": "API REST del laboratorio bancario (Go + PostgreSQL).\n\n## Antes de empezar\n1. Levanta la API: `docker compose up -d --build` (ver README.md).\n2. Carga el operator (una vez): `docker exec -i accounts-api-db psql -U bank -d bank < seeds/operators.sql`.\n3. Si tu API no está en `http://localhost:3000`, cambia la variable `baseUrl`.\n\n## Cómo usarla\nEjecuta las carpetas **en orden** con *Run collection* (o una por una): `1. Registro` → `2. Login` → `3. Crear cuentas` → `4. Consultar` → `5. Recargas` → `6. Transferencias` → `7. Historial`. Las carpetas 8 y 9 son opcionales.\n\nTodo se guarda solo en **variables de la colección** (pestaña *Variables*): emails únicos por ejecución, tokens (`anaAccessToken`, `evaAccessToken`, `operatorAccessToken`), ids y números de cuenta, e `Idempotency-Key`. No hay nada que copiar a mano.\n\n## Cosas a tener en cuenta\n- El **access token dura 15 minutos**. Si una petición responde 401, vuelve a ejecutar la carpeta `2. Login`.\n- Los emails se generan nuevos en cada `1. Registro`, así que la colección se puede repetir sin el error 409. Los datos creados quedan en la BD (`docker compose down -v` la borra).\n- Una cuenta admite **5 recargas por día UTC**: ejecutar el flujo completo muchas veces sobre la **misma** cuenta (sin volver a `1. Registro`/`3. Crear cuentas`) agotará el tope y la recarga responderá 422.\n- `Idempotency-Key`: cada recarga/transferencia genera una nueva; las peticiones \"Repetir…\" reutilizan la anterior y deben responder con `Idempotent-Replayed: true`.\n- Los montos van en **centavos**: 150000 = 1.500,00.\n",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "1. Registro",
+      "description": "F-01. Público, no necesita token.",
+      "item": [
+        {
+          "name": "Registrar a Ana (customer)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Email único en cada ejecución, para poder repetir la colección sin el 409.",
+                  "pm.collectionVariables.set('anaEmail', 'ana.' + Date.now() + '@mail.com');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "if (pm.response.code === 201) {",
+                  "  const user = pm.response.json();",
+                  "  pm.test('rol customer y sin contraseña en la respuesta', () => {",
+                  "    pm.expect(user.role).to.eql('customer');",
+                  "    pm.expect(user).to.not.have.property('password');",
+                  "    pm.expect(user).to.not.have.property('passwordHash');",
+                  "  });",
+                  "  pm.test('email guardado en minúsculas', () => pm.expect(user.email).to.eql(pm.collectionVariables.get('anaEmail')));",
+                  "  pm.collectionVariables.set('anaUserId', user.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "register"
+              ]
+            },
+            "description": "F-01. Crea un cliente. El email se genera único en cada ejecución (ana.<timestamp>@mail.com) y se guarda en `anaEmail`.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Ana Pérez\",\n  \"email\": \"{{anaEmail}}\",\n  \"password\": \"{{userPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Registrar a Eva (customer)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Email único en cada ejecución, para poder repetir la colección sin el 409.",
+                  "pm.collectionVariables.set('evaEmail', 'eva.' + Date.now() + '@mail.com');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "if (pm.response.code === 201) {",
+                  "  const user = pm.response.json();",
+                  "  pm.test('rol customer y sin contraseña en la respuesta', () => {",
+                  "    pm.expect(user.role).to.eql('customer');",
+                  "    pm.expect(user).to.not.have.property('password');",
+                  "    pm.expect(user).to.not.have.property('passwordHash');",
+                  "  });",
+                  "  pm.test('email guardado en minúsculas', () => pm.expect(user.email).to.eql(pm.collectionVariables.get('evaEmail')));",
+                  "  pm.collectionVariables.set('evaUserId', user.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "register"
+              ]
+            },
+            "description": "F-01. Segundo cliente, será el destino de la transferencia.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Eva Ruiz\",\n  \"email\": \"{{evaEmail}}\",\n  \"password\": \"{{userPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "2. Login (guarda los tokens)",
+      "description": "F-02. Cada login guarda sus tokens en variables de la colección.",
+      "item": [
+        {
+          "name": "Login Ana",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "if (pm.response.code === 200) {",
+                  "  const tokens = pm.response.json();",
+                  "  pm.test('par de tokens (Bearer, 15 min)', () => {",
+                  "    pm.expect(tokens.tokenType).to.eql('Bearer');",
+                  "    pm.expect(tokens.expiresIn).to.eql(900);",
+                  "    pm.expect(tokens.accessToken).to.be.a('string').and.not.empty;",
+                  "    pm.expect(tokens.refreshToken).to.be.a('string').and.not.empty;",
+                  "  });",
+                  "  // Se guardan para las demás peticiones: el access token va en Authorization: Bearer.",
+                  "  pm.collectionVariables.set('anaAccessToken', tokens.accessToken);",
+                  "  pm.collectionVariables.set('anaRefreshToken', tokens.refreshToken);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "F-02. Guarda `anaAccessToken` y `anaRefreshToken`. El access token dura 15 minutos: si vence, vuelve a ejecutar este login.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{anaEmail}}\",\n  \"password\": \"{{userPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Login Eva",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "if (pm.response.code === 200) {",
+                  "  const tokens = pm.response.json();",
+                  "  pm.test('par de tokens (Bearer, 15 min)', () => {",
+                  "    pm.expect(tokens.tokenType).to.eql('Bearer');",
+                  "    pm.expect(tokens.expiresIn).to.eql(900);",
+                  "    pm.expect(tokens.accessToken).to.be.a('string').and.not.empty;",
+                  "    pm.expect(tokens.refreshToken).to.be.a('string').and.not.empty;",
+                  "  });",
+                  "  // Se guardan para las demás peticiones: el access token va en Authorization: Bearer.",
+                  "  pm.collectionVariables.set('evaAccessToken', tokens.accessToken);",
+                  "  pm.collectionVariables.set('evaRefreshToken', tokens.refreshToken);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "F-02. Guarda `evaAccessToken` y `evaRefreshToken`.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{evaEmail}}\",\n  \"password\": \"{{userPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Login Operator",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "if (pm.response.code === 200) {",
+                  "  const tokens = pm.response.json();",
+                  "  pm.test('par de tokens (Bearer, 15 min)', () => {",
+                  "    pm.expect(tokens.tokenType).to.eql('Bearer');",
+                  "    pm.expect(tokens.expiresIn).to.eql(900);",
+                  "    pm.expect(tokens.accessToken).to.be.a('string').and.not.empty;",
+                  "    pm.expect(tokens.refreshToken).to.be.a('string').and.not.empty;",
+                  "  });",
+                  "  // Se guardan para las demás peticiones: el access token va en Authorization: Bearer.",
+                  "  pm.collectionVariables.set('operatorAccessToken', tokens.accessToken);",
+                  "  pm.collectionVariables.set('operatorRefreshToken', tokens.refreshToken);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "F-02. Guarda `operatorAccessToken`. Requiere haber cargado el seed: `docker exec -i accounts-api-db psql -U bank -d bank < seeds/operators.sql`.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{operatorEmail}}\",\n  \"password\": \"{{operatorPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "3. Crear cuentas",
+      "description": "",
+      "item": [
+        {
+          "name": "Crear cuenta de Ana (savings)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "if (pm.response.code === 201) {",
+                  "  const account = pm.response.json();",
+                  "  pm.test('cuenta savings con saldo 0 y número de 10 dígitos', () => {",
+                  "    pm.expect(account.accountType).to.eql('savings');",
+                  "    pm.expect(account.balance).to.eql(0);",
+                  "    pm.expect(account.accountNumber).to.match(/^[0-9]{10}$/);",
+                  "  });",
+                  "  pm.collectionVariables.set('anaAccountId', account.id);",
+                  "  pm.collectionVariables.set('anaAccountNumber', account.accountNumber);",
+                  "  pm.collectionVariables.set('anaExpectedBalance', '0');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/accounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts"
+              ]
+            },
+            "description": "F-05. Solo `customer`. Guarda `anaAccountId` y `anaAccountNumber`.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{anaAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accountType\": \"savings\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Crear cuenta de Eva (checking)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "if (pm.response.code === 201) {",
+                  "  const account = pm.response.json();",
+                  "  pm.test('cuenta checking con saldo 0 y número de 10 dígitos', () => {",
+                  "    pm.expect(account.accountType).to.eql('checking');",
+                  "    pm.expect(account.balance).to.eql(0);",
+                  "    pm.expect(account.accountNumber).to.match(/^[0-9]{10}$/);",
+                  "  });",
+                  "  pm.collectionVariables.set('evaAccountId', account.id);",
+                  "  pm.collectionVariables.set('evaAccountNumber', account.accountNumber);",
+                  "  pm.collectionVariables.set('evaExpectedBalance', '0');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/accounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts"
+              ]
+            },
+            "description": "F-05. Cuenta corriente (sobregiro hasta -500000). Guarda `evaAccountId` y `evaAccountNumber`.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{evaAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accountType\": \"checking\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "4. Consultar cuentas",
+      "description": "",
+      "item": [
+        {
+          "name": "Consultar cuenta de Ana (como Ana)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "if (pm.response.code === 200) {",
+                  "  const account = pm.response.json();",
+                  "  pm.test('es la cuenta de Ana', () => pm.expect(account.id).to.eql(pm.collectionVariables.get('anaAccountId')));",
+                  "  pm.test('balance es un entero en centavos', () => pm.expect(Number.isInteger(account.balance)).to.be.true);",
+                  "  pm.collectionVariables.set('anaBalance', String(account.balance));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/accounts/{{anaAccountId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "{{anaAccountId}}"
+              ]
+            },
+            "description": "F-07. Un customer consulta su propia cuenta.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{anaAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Consultar cuenta de Ana (como operator)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "if (pm.response.code === 200) {",
+                  "  const account = pm.response.json();",
+                  "  pm.test('es la cuenta de Ana', () => pm.expect(account.id).to.eql(pm.collectionVariables.get('anaAccountId')));",
+                  "  pm.test('balance es un entero en centavos', () => pm.expect(Number.isInteger(account.balance)).to.be.true);",
+                  "  pm.collectionVariables.set('anaBalance', String(account.balance));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/accounts/{{anaAccountId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "{{anaAccountId}}"
+              ]
+            },
+            "description": "F-07. Un operator puede consultar cualquier cuenta.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{operatorAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Listar las cuentas de Ana",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "if (pm.response.code === 200) {",
+                  "  const items = pm.response.json().items;",
+                  "  pm.test('incluye la cuenta de Ana y ninguna de otro cliente', () => {",
+                  "    pm.expect(items.map(a => a.id)).to.include(pm.collectionVariables.get('anaAccountId'));",
+                  "    pm.expect(items.map(a => a.id)).to.not.include(pm.collectionVariables.get('evaAccountId'));",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/accounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts"
+              ]
+            },
+            "description": "F-06. Solo `customer`: devuelve únicamente sus cuentas.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{anaAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "5. Recargas (operator)",
+      "description": "",
+      "item": [
+        {
+          "name": "Recargar cuenta de Ana (salary 150000)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Idempotency-Key nueva (UUID v4) para esta operación. Las repeticiones reutilizan la misma.",
+                  "pm.collectionVariables.set('rechargeKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "pm.test('es la primera ejecución (sin Idempotent-Replayed)', () => pm.expect(pm.response.headers.has('Idempotent-Replayed')).to.be.false);",
+                  "if (pm.response.code === 201) {",
+                  "  const movement = pm.response.json();",
+                  "  pm.test('movimiento recharge de 150000, tipo salary', () => {",
+                  "    pm.expect(movement.movementType).to.eql('recharge');",
+                  "    pm.expect(movement.amount).to.eql(150000);",
+                  "    pm.expect(movement.details).to.eql({ rechargeType: 'salary' });",
+                  "    pm.expect(movement.accountId).to.eql(pm.collectionVariables.get('anaAccountId'));",
+                  "  });",
+                  "  pm.collectionVariables.set('rechargeMovementId', movement.id);",
+                  "  const expected = Number(pm.collectionVariables.get('anaExpectedBalance')) + 150000;",
+                  "  pm.collectionVariables.set('anaExpectedBalance', String(expected));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{rechargeKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/recharge",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "recharge"
+              ]
+            },
+            "description": "F-08. Solo `operator`. Genera una `Idempotency-Key` nueva y la guarda en `rechargeKey`. Tope: 5 recargas y 300000000 por cuenta y por día (UTC).",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{operatorAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accountNumber\": \"{{anaAccountNumber}}\",\n  \"amount\": 150000,\n  \"rechargeType\": \"salary\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Repetir la recarga (misma Idempotency-Key)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created (respuesta guardada)', () => pm.response.to.have.status(201));",
+                  "pm.test('encabezado Idempotent-Replayed: true', () => pm.expect(pm.response.headers.get('Idempotent-Replayed')).to.eql('true'));",
+                  "pm.test('mismo movimiento: no se recargó otra vez', () => {",
+                  "  pm.expect(pm.response.json().id).to.eql(pm.collectionVariables.get('rechargeMovementId'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{rechargeKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/recharge",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "recharge"
+              ]
+            },
+            "description": "Misma petición y misma key que la anterior: no vuelve a recargar; responde lo mismo con `Idempotent-Replayed: true`.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{operatorAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accountNumber\": \"{{anaAccountNumber}}\",\n  \"amount\": 150000,\n  \"rechargeType\": \"salary\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "6. Transferencias (customer)",
+      "description": "",
+      "item": [
+        {
+          "name": "Transferir 40000 de Ana a Eva",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Idempotency-Key nueva (UUID v4) para esta operación. Las repeticiones reutilizan la misma.",
+                  "pm.collectionVariables.set('transferKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "pm.test('es la primera ejecución (sin Idempotent-Replayed)', () => pm.expect(pm.response.headers.has('Idempotent-Replayed')).to.be.false);",
+                  "if (pm.response.code === 201) {",
+                  "  const t = pm.response.json();",
+                  "  pm.test('dos movimientos con el mismo monto, cruzados entre las cuentas', () => {",
+                  "    pm.expect(t.transferOut.movementType).to.eql('transfer_out');",
+                  "    pm.expect(t.transferIn.movementType).to.eql('transfer_in');",
+                  "    pm.expect(t.transferOut.amount).to.eql(40000);",
+                  "    pm.expect(t.transferIn.amount).to.eql(40000);",
+                  "    pm.expect(t.transferOut.accountId).to.eql(pm.collectionVariables.get('anaAccountId'));",
+                  "    pm.expect(t.transferIn.accountId).to.eql(pm.collectionVariables.get('evaAccountId'));",
+                  "    pm.expect(t.transferOut.details.relatedAccountId).to.eql(t.transferIn.accountId);",
+                  "    pm.expect(t.transferIn.details.relatedAccountId).to.eql(t.transferOut.accountId);",
+                  "  });",
+                  "  pm.collectionVariables.set('transferOutId', t.transferOut.id);",
+                  "  pm.collectionVariables.set('anaExpectedBalance', String(Number(pm.collectionVariables.get('anaExpectedBalance')) - 40000));",
+                  "  pm.collectionVariables.set('evaExpectedBalance', String(Number(pm.collectionVariables.get('evaExpectedBalance')) + 40000));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{transferKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/transfers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transfers"
+              ]
+            },
+            "description": "F-09. Solo `customer`, desde una cuenta propia. Genera una `Idempotency-Key` nueva y la guarda en `transferKey`.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{anaAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accountOrigin\": \"{{anaAccountNumber}}\",\n  \"accountDestination\": \"{{evaAccountNumber}}\",\n  \"amount\": 40000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Repetir la transferencia (misma Idempotency-Key)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created (respuesta guardada)', () => pm.response.to.have.status(201));",
+                  "pm.test('encabezado Idempotent-Replayed: true', () => pm.expect(pm.response.headers.get('Idempotent-Replayed')).to.eql('true'));",
+                  "pm.test('mismos movimientos: no se transfirió otra vez', () => {",
+                  "  pm.expect(pm.response.json().transferOut.id).to.eql(pm.collectionVariables.get('transferOutId'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{transferKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/transfers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transfers"
+              ]
+            },
+            "description": "Misma key y mismo cuerpo: no transfiere otra vez; responde lo mismo con `Idempotent-Replayed: true`.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{anaAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accountOrigin\": \"{{anaAccountNumber}}\",\n  \"accountDestination\": \"{{evaAccountNumber}}\",\n  \"amount\": 40000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Saldo de Ana tras las operaciones",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "if (pm.response.code === 200) {",
+                  "  const balance = pm.response.json().balance;",
+                  "  const expected = Number(pm.collectionVariables.get('anaExpectedBalance'));",
+                  "  pm.test('saldo de Ana = ' + expected + ' (recargas y transferencias de esta ejecución)', () => pm.expect(balance).to.eql(expected));",
+                  "  pm.collectionVariables.set('anaBalance', String(balance));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/accounts/{{anaAccountId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "{{anaAccountId}}"
+              ]
+            },
+            "description": "Comprueba que el saldo = recargas − transferencias de esta ejecución (150000 − 40000 = 110000). Si ejecutas peticiones sueltas fuera de orden, este cálculo puede no coincidir.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{anaAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Saldo de Eva tras las operaciones",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "if (pm.response.code === 200) {",
+                  "  const balance = pm.response.json().balance;",
+                  "  const expected = Number(pm.collectionVariables.get('evaExpectedBalance'));",
+                  "  pm.test('saldo de Eva = ' + expected + ' (recargas y transferencias de esta ejecución)', () => pm.expect(balance).to.eql(expected));",
+                  "  pm.collectionVariables.set('evaBalance', String(balance));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/accounts/{{evaAccountId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "{{evaAccountId}}"
+              ]
+            },
+            "description": "Eva recibió 40000.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{evaAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "7. Historial de movimientos",
+      "description": "",
+      "item": [
+        {
+          "name": "Historial de Ana (página 1)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "if (pm.response.code === 200) {",
+                  "  const page = pm.response.json();",
+                  "  pm.test('página 1 de tamaño fijo 20', () => {",
+                  "    pm.expect(page.page).to.eql(1);",
+                  "    pm.expect(page.pageSize).to.eql(20);",
+                  "    pm.expect(page.items).to.be.an('array').and.have.length.of.at.most(20);",
+                  "  });",
+                  "  pm.test('todos los movimientos son de la cuenta de Ana', () => {",
+                  "    page.items.forEach(m => pm.expect(m.accountId).to.eql(pm.collectionVariables.get('anaAccountId')));",
+                  "  });",
+                  "  pm.test('orden: del más reciente al más antiguo', () => {",
+                  "    for (let i = 1; i < page.items.length; i++) {",
+                  "      pm.expect(page.items[i - 1].createdAt >= page.items[i].createdAt).to.be.true;",
+                  "    }",
+                  "  });",
+                  "}",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "  const types = pm.response.json().items.map(m => m.movementType);",
+                  "  pm.test('contiene la recarga y la transferencia enviada', () => {",
+                  "    pm.expect(types).to.include('recharge');",
+                  "    pm.expect(types).to.include('transfer_out');",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/accounts/{{anaAccountId}}/movements?page=1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "{{anaAccountId}}",
+                "movements"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "F-10. Páginas fijas de 20, del más reciente al más antiguo. Cambia el valor de `page` (1 a 10000); una página posterior a la última devuelve `items: []`.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{anaAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Historial de Eva (página 1)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "if (pm.response.code === 200) {",
+                  "  const page = pm.response.json();",
+                  "  pm.test('página 1 de tamaño fijo 20', () => {",
+                  "    pm.expect(page.page).to.eql(1);",
+                  "    pm.expect(page.pageSize).to.eql(20);",
+                  "    pm.expect(page.items).to.be.an('array').and.have.length.of.at.most(20);",
+                  "  });",
+                  "  pm.test('todos los movimientos son de la cuenta de Eva', () => {",
+                  "    page.items.forEach(m => pm.expect(m.accountId).to.eql(pm.collectionVariables.get('evaAccountId')));",
+                  "  });",
+                  "  pm.test('orden: del más reciente al más antiguo', () => {",
+                  "    for (let i = 1; i < page.items.length; i++) {",
+                  "      pm.expect(page.items[i - 1].createdAt >= page.items[i].createdAt).to.be.true;",
+                  "    }",
+                  "  });",
+                  "}",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "  pm.test('contiene la transferencia recibida', () => pm.expect(pm.response.json().items.map(m => m.movementType)).to.include('transfer_in'));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/accounts/{{evaAccountId}}/movements?page=1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "{{evaAccountId}}",
+                "movements"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "F-10. Eva ve la transferencia recibida.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{evaAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Historial de Ana (como operator)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "if (pm.response.code === 200) {",
+                  "  const page = pm.response.json();",
+                  "  pm.test('página 1 de tamaño fijo 20', () => {",
+                  "    pm.expect(page.page).to.eql(1);",
+                  "    pm.expect(page.pageSize).to.eql(20);",
+                  "    pm.expect(page.items).to.be.an('array').and.have.length.of.at.most(20);",
+                  "  });",
+                  "  pm.test('todos los movimientos son de la cuenta de Ana', () => {",
+                  "    page.items.forEach(m => pm.expect(m.accountId).to.eql(pm.collectionVariables.get('anaAccountId')));",
+                  "  });",
+                  "  pm.test('orden: del más reciente al más antiguo', () => {",
+                  "    for (let i = 1; i < page.items.length; i++) {",
+                  "      pm.expect(page.items[i - 1].createdAt >= page.items[i].createdAt).to.be.true;",
+                  "    }",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/accounts/{{anaAccountId}}/movements?page=1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "{{anaAccountId}}",
+                "movements"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "F-10. Un operator puede ver el historial de cualquier cuenta.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{operatorAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "8. Casos de error (opcional)",
+      "description": "Cada petición espera el error indicado. Ninguna cambia saldos.",
+      "item": [
+        {
+          "name": "Recarga cash sobre el tope → 422",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Idempotency-Key nueva (UUID v4) para esta operación. Las repeticiones reutilizan la misma.",
+                  "pm.collectionVariables.set('errorKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('422 CASH_LIMIT_EXCEEDED', () => {",
+                  "  pm.response.to.have.status(422);",
+                  "  pm.expect(pm.response.json().code).to.eql('CASH_LIMIT_EXCEEDED');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{errorKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/recharge",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "recharge"
+              ]
+            },
+            "description": "RN-08: `cash` máximo 300000. No modifica el saldo.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{operatorAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accountNumber\": \"{{anaAccountNumber}}\",\n  \"amount\": 300001,\n  \"rechargeType\": \"cash\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Misma Idempotency-Key con otro monto → 422",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('422 IDEMPOTENCY_KEY_REUSED', () => {",
+                  "  pm.response.to.have.status(422);",
+                  "  pm.expect(pm.response.json().code).to.eql('IDEMPOTENCY_KEY_REUSED');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{rechargeKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/recharge",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "recharge"
+              ]
+            },
+            "description": "Reusa `rechargeKey` (de la recarga del paso 5) con un monto distinto.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{operatorAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accountNumber\": \"{{anaAccountNumber}}\",\n  \"amount\": 1,\n  \"rechargeType\": \"salary\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Un customer intenta recargar → 403",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403 FORBIDDEN', () => {",
+                  "  pm.response.to.have.status(403);",
+                  "  pm.expect(pm.response.json().code).to.eql('FORBIDDEN');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{errorKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/recharge",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "recharge"
+              ]
+            },
+            "description": "RN-22: solo un operator puede recargar.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{anaAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accountNumber\": \"{{anaAccountNumber}}\",\n  \"amount\": 1000,\n  \"rechargeType\": \"cash\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Transferir más del saldo (savings) → 422",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Idempotency-Key nueva (UUID v4) para esta operación. Las repeticiones reutilizan la misma.",
+                  "pm.collectionVariables.set('errorKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('422 INSUFFICIENT_FUNDS', () => {",
+                  "  pm.response.to.have.status(422);",
+                  "  pm.expect(pm.response.json().code).to.eql('INSUFFICIENT_FUNDS');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{errorKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/transfers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transfers"
+              ]
+            },
+            "description": "RN-04/RN-13: una cuenta de ahorros no puede quedar en negativo.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{anaAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accountOrigin\": \"{{anaAccountNumber}}\",\n  \"accountDestination\": \"{{evaAccountNumber}}\",\n  \"amount\": 999999999\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Transferir desde la cuenta de otro cliente → 404",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Idempotency-Key nueva (UUID v4) para esta operación. Las repeticiones reutilizan la misma.",
+                  "pm.collectionVariables.set('errorKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404 NOT_FOUND', () => {",
+                  "  pm.response.to.have.status(404);",
+                  "  pm.expect(pm.response.json().code).to.eql('NOT_FOUND');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{errorKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/transfers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transfers"
+              ]
+            },
+            "description": "RN-23: un origen ajeno se trata como inexistente.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{evaAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accountOrigin\": \"{{anaAccountNumber}}\",\n  \"accountDestination\": \"{{evaAccountNumber}}\",\n  \"amount\": 1000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Consultar la cuenta de otro cliente → 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404 NOT_FOUND', () => {",
+                  "  pm.response.to.have.status(404);",
+                  "  pm.expect(pm.response.json().code).to.eql('NOT_FOUND');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/accounts/{{anaAccountId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "{{anaAccountId}}"
+              ]
+            },
+            "description": "RN-24: no se revela que la cuenta existe.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{evaAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Sin token → 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401 UNAUTHORIZED', () => {",
+                  "  pm.response.to.have.status(401);",
+                  "  pm.expect(pm.response.json().code).to.eql('UNAUTHORIZED');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/accounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts"
+              ]
+            },
+            "description": "Falta el encabezado Authorization.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "9. Sesión (extras)",
+      "description": "Opcional. Ejecútalo al final: el logout revoca el refresh token de Ana.",
+      "item": [
+        {
+          "name": "Renovar tokens (refresh)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "if (pm.response.code === 200) {",
+                  "  const tokens = pm.response.json();",
+                  "  pm.test('refresh token nuevo (rotación)', () => pm.expect(tokens.refreshToken).to.not.eql(pm.collectionVariables.get('anaRefreshToken')));",
+                  "  pm.collectionVariables.set('anaAccessToken', tokens.accessToken);",
+                  "  pm.collectionVariables.set('anaRefreshToken', tokens.refreshToken);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "refresh"
+              ]
+            },
+            "description": "F-03. Rota el refresh token de Ana: el anterior queda revocado y se guardan los nuevos.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{anaRefreshToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Cerrar sesión de Ana (logout)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('204 No Content', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "logout"
+              ]
+            },
+            "description": "F-04. Revoca el refresh token de Ana. El access token sigue válido hasta que venza.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{anaAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{anaRefreshToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Reusar el refresh token revocado → 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401 INVALID_REFRESH_TOKEN', () => {",
+                  "  pm.response.to.have.status(401);",
+                  "  pm.expect(pm.response.json().code).to.eql('INVALID_REFRESH_TOKEN');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "refresh"
+              ]
+            },
+            "description": "Tras el logout el refresh token ya no sirve.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{anaRefreshToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "type": "noauth"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "userPassword",
+      "value": "S3gura2026",
+      "type": "string"
+    },
+    {
+      "key": "operatorEmail",
+      "value": "operator@bank.local",
+      "type": "string"
+    },
+    {
+      "key": "operatorPassword",
+      "value": "Operator2026!",
+      "type": "string"
+    },
+    {
+      "key": "anaEmail",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "evaEmail",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "anaUserId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "evaUserId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "anaAccessToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "anaRefreshToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "evaAccessToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "evaRefreshToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "operatorAccessToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "operatorRefreshToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "anaAccountId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "anaAccountNumber",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "evaAccountId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "evaAccountNumber",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "anaExpectedBalance",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "evaExpectedBalance",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "anaBalance",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "evaBalance",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "rechargeKey",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "rechargeMovementId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "transferKey",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "transferOutId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "errorKey",
+      "value": "",
+      "type": "string"
+    }
+  ]
+}
