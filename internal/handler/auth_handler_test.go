@@ -28,7 +28,8 @@ func newTestRouterDB(t *testing.T) (http.Handler, *sql.DB) {
 	db := testdb.Open(t)
 	tokens := service.NewTokenIssuer(testSecret)
 	auth := service.NewAuthService(db, service.NewPasswordHasher(4), tokens)
-	handlers := NewHandlers(auth, service.NewAccountService(db), service.NewRechargeService(db), tokens)
+	handlers := NewHandlers(auth, service.NewAccountService(db), service.NewRechargeService(db),
+		service.NewTransferService(db), tokens)
 	return NewRouter(handlers), db
 }
 

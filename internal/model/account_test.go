@@ -67,3 +67,33 @@ func TestParseRechargeType(t *testing.T) {
 		}
 	}
 }
+
+// T6.1: sobregiro por tipo, en el límite exacto y con 1 centavo de más.
+func TestWithdraw(t *testing.T) {
+	tests := []struct {
+		name          string
+		kind          AccountType
+		balance, take int64
+		want          int64
+		wantErr       error
+	}{
+		{"savings normal", AccountSavings, 1000, 400, 600, nil},
+		{"savings to exactly zero", AccountSavings, 1000, 1000, 0, nil},
+		{"savings one cent over", AccountSavings, 1000, 1001, 1000, ErrInsufficientFunds},
+		{"savings empty", AccountSavings, 0, 1, 0, ErrInsufficientFunds},
+		{"checking into overdraft", AccountChecking, 0, 300000, -300000, nil},
+		{"checking to exactly -500000", AccountChecking, 1000, 501000, -500000, nil},
+		{"checking one cent over the overdraft", AccountChecking, 1000, 501001, 1000, ErrInsufficientFunds},
+		{"checking already at the limit", AccountChecking, -500000, 1, -500000, ErrInsufficientFunds},
+		{"max amount from zero", AccountChecking, 0, MaxAmountCents, 0, ErrInsufficientFunds},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			a := Account{Kind: tc.kind, BalanceCents: tc.balance, OverdraftLimitCents: tc.kind.OverdraftLimitCents()}
+			err := a.Withdraw(tc.take)
+			if err != tc.wantErr || a.BalanceCents != tc.want {
+				t.Errorf("balance = %d, err = %v; want %d, %v", a.BalanceCents, err, tc.want, tc.wantErr)
+			}
+		})
+	}
+}

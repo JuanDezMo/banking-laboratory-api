@@ -141,3 +141,84 @@ func TestRechargeEndpointErrors(t *testing.T) {
 	}
 	assertErrorBody(t, rec, "CASH_LIMIT_EXCEEDED", "Cash recharge limit exceeded")
 }
+
+// doTransfer envía POST /transfers con el token y la Idempotency-Key dados ("" = sin encabezado).
+func doTransfer(router http.Handler, token, key, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPost, "/transfers", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	if key != "" {
+		req.Header.Set("Idempotency-Key", key)
+	}
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	return rec
+}
+
+// T6.6: 201 con { transferOut, transferIn } según openapi.yaml.
+func TestTransferEndpoint(t *testing.T) {
+	router, db := newTestRouterDB(t)
+	operator := realOperatorToken(t, db)
+	ana, _ := loginAs(t, router, "ana@mail.com")
+	eva, _ := loginAs(t, router, "eva@mail.com")
+	from := createAccount(t, router, ana, "savings")
+	to := createAccount(t, router, eva, "savings")
+	fromNumber, toNumber := from["accountNumber"].(string), to["accountNumber"].(string)
+	doRecharge(router, operator, uuid.NewV4().String(), `{"accountNumber":"`+fromNumber+`","amount":100000,"rechargeType":"salary"}`)
+
+	key := uuid.NewV4().String()
+	body := `{"accountOrigin":"` + fromNumber + `","accountDestination":"` + toNumber + `","amount":40000}`
+	rec := doTransfer(router, ana, key, body)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
+	}
+	var res map[string]map[string]any
+	json.Unmarshal(rec.Body.Bytes(), &res)
+	out, in := res["transferOut"], res["transferIn"]
+	outDetails, _ := out["details"].(map[string]any)
+	inDetails, _ := in["details"].(map[string]any)
+	if len(res) != 2 || len(out) != 6 || len(in) != 6 ||
+		out["movementType"] != "transfer_out" || out["accountId"] != from["id"] || out["amount"] != float64(40000) ||
+		len(outDetails) != 1 || outDetails["relatedAccountId"] != to["id"] ||
+		in["movementType"] != "transfer_in" || in["accountId"] != to["id"] || in["amount"] != float64(40000) ||
+		len(inDetails) != 1 || inDetails["relatedAccountId"] != from["id"] ||
+		!isoMillis.MatchString(out["createdAt"].(string)) || !isoMillis.MatchString(in["createdAt"].(string)) {
+		t.Errorf("body = %s", rec.Body)
+	}
+
+	// Repetición: mismo cuerpo, con Idempotent-Replayed: true.
+	again := doTransfer(router, ana, key, body)
+	if again.Code != http.StatusCreated || again.Header().Get("Idempotent-Replayed") != "true" || again.Body.String() != rec.Body.String() {
+		t.Errorf("replay: status = %d, replayed = %q, body = %s", again.Code, again.Header().Get("Idempotent-Replayed"), again.Body)
+	}
+
+	tests := []struct {
+		name, token, key, body string
+		status                 int
+		code, message          string
+	}{
+		{"1 no token", "", "", `x`, 401, "UNAUTHORIZED", "Missing or invalid token"},
+		{"2 operator", operator, "", `x`, 403, "FORBIDDEN", "Access denied"},
+		{"3 missing key", ana, "", `x`, 400, "BAD_REQUEST", "Invalid idempotency key"},
+		{"4 same key, other request", ana, key, `{"accountOrigin":"` + fromNumber + `","accountDestination":"` + toNumber + `","amount":1}`,
+			422, "IDEMPOTENCY_KEY_REUSED", "Idempotency key already used with a different request"},
+		{"5 invalid body", ana, uuid.NewV4().String(), `{"accountOrigin":"` + fromNumber + `"}`, 400, "BAD_REQUEST", "Invalid request body"},
+		{"9 same account", ana, uuid.NewV4().String(), `{"accountOrigin":"` + fromNumber + `","accountDestination":"` + fromNumber + `","amount":1}`,
+			400, "BAD_REQUEST", "Cannot transfer to the same account"},
+		{"10 origin of another customer", eva, uuid.NewV4().String(), `{"accountOrigin":"` + fromNumber + `","accountDestination":"` + toNumber + `","amount":1}`,
+			404, "NOT_FOUND", "Account not found"},
+		{"12 insufficient funds", ana, uuid.NewV4().String(), `{"accountOrigin":"` + fromNumber + `","accountDestination":"` + toNumber + `","amount":60001}`,
+			422, "INSUFFICIENT_FUNDS", "Insufficient funds"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := doTransfer(router, tc.token, tc.key, tc.body)
+			if rec.Code != tc.status {
+				t.Fatalf("status = %d, want %d (body %s)", rec.Code, tc.status, rec.Body)
+			}
+			assertErrorBody(t, rec, tc.code, tc.message)
+		})
+	}
+}

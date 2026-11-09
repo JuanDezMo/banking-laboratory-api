@@ -41,3 +41,36 @@ func (h *Handlers) Recharge(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusCreated, newMovementResponse(movement))
 }
+
+// Transfer atiende POST /transfers (F-09). Solo customer, desde sus propias cuentas.
+func (h *Handlers) Transfer(w http.ResponseWriter, r *http.Request) {
+	user := currentUser(r)
+	if !requireRole(w, user, model.RoleCustomer) { // paso 2
+		return
+	}
+	key, err := service.NormalizeIdempotencyKey(r.Header.Get("Idempotency-Key"))
+	if err != nil {
+		writeError(w, err) // paso 3
+		return
+	}
+
+	body := decodeObject(r)
+	in := service.TransferInput{
+		AccountOrigin:      body.String("accountOrigin"),
+		AccountDestination: body.String("accountDestination"),
+		Amount:             body.Int64("amount"),
+	}
+
+	result, replayed, err := h.transfers.Transfer(r.Context(), user, key, in, body.Err())
+	if replayed {
+		w.Header().Set(replayedHeader, "true")
+	}
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, transferResponse{
+		TransferOut: newMovementResponse(result.Out),
+		TransferIn:  newMovementResponse(result.In),
+	})
+}

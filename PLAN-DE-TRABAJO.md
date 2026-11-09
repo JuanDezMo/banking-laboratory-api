@@ -48,7 +48,7 @@ Plan para implementar la API del laboratorio bancario en Go, en esta carpeta (`g
 | I3 | ✅ Sesión: refresh, auth, logout (F-03, F-04) | 7 | 11 |
 | I4 | ✅ Cuentas (F-05 a F-07) | 7 | 10 |
 | I5 | ✅ Recarga con idempotencia (F-08 sin topes) | 10 | 17 |
-| I6 | Transferencias (F-09) | 8 | 13 |
+| I6 | ✅ Transferencias (F-09) | 8 | 13 |
 | I7 | Topes diarios e historial (F-08 completa, F-10) | 7 | 12 |
 | I8 | Interfaces y pruebas sin BD | 5 | 9 |
 | I9 | Opcional: extensiones | 5 | 10 |
@@ -197,14 +197,14 @@ Plan para implementar la API del laboratorio bancario en Go, en esta carpeta (`g
 
 | ID | Tarea | Est. | Medición |
 |---|---|---|---|
-| T6.1 | `Account.Withdraw` con sobregiro por tipo (RN-04, RN-05) | S | Prueba de tabla ≥ 6 casos (límite exacto, 1 centavo de más, por tipo) |
-| T6.2 | `account_repo.ResolveNumbers`: números → ids | XS | Prueba: número inexistente → no encontrado |
-| T6.3 | `account_repo.LockByIDs`: `FOR UPDATE` por id ascendente | S | Prueba: el SQL generado ordena por id; dos ids invertidos se bloquean en el mismo orden |
-| T6.4 | `TransferService`: orden de validación (origen ajeno → 404) | S | Prueba de integración: 1 caso por error de F-09 en el orden del spec |
-| T6.5 | `TransferService`: transacción, 2 movimientos, idempotencia | S | Prueba: tras transferir, existen `transferOut` y `transferIn` con el mismo monto |
-| T6.6 | **F-09** handler con respuesta `{ transferOut, transferIn }` | XS | `curl` → `201` con el JSON de `openapi.yaml` |
-| T6.7 | Prueba de concurrencia: transferencias cruzadas A→B y B→A en paralelo (`sync.WaitGroup`) | S | `go test -race -count=20 -run Concurrency` en verde, sin deadlock |
-| T6.8 | Prueba de la invariante RN-17: saldo = suma de movimientos firmados | XS | La consulta de verificación devuelve 0 cuentas con diferencia tras T6.7 |
+| T6.1 | ✅ `Account.Withdraw` con sobregiro por tipo (RN-04, RN-05) | S | Prueba de tabla ≥ 6 casos (límite exacto, 1 centavo de más, por tipo) |
+| T6.2 | ✅ `account_repo.ResolveNumbers`: números → ids | XS | Prueba: número inexistente → no encontrado |
+| T6.3 | ✅ `account_repo.LockByIDs`: `FOR UPDATE` por id ascendente | S | Prueba: el SQL generado ordena por id; dos ids invertidos se bloquean en el mismo orden |
+| T6.4 | ✅ `TransferService`: orden de validación (origen ajeno → 404) | S | Prueba de integración: 1 caso por error de F-09 en el orden del spec |
+| T6.5 | ✅ `TransferService`: transacción, 2 movimientos, idempotencia | S | Prueba: tras transferir, existen `transferOut` y `transferIn` con el mismo monto |
+| T6.6 | ✅ **F-09** handler con respuesta `{ transferOut, transferIn }` | XS | `curl` → `201` con el JSON de `openapi.yaml` |
+| T6.7 | ✅ Prueba de concurrencia: transferencias cruzadas A→B y B→A en paralelo (`sync.WaitGroup`) | S | `go test -race -count=20 -run Concurrency` en verde, sin deadlock |
+| T6.8 | ✅ Prueba de la invariante RN-17: saldo = suma de movimientos firmados | XS | La consulta de verificación devuelve 0 cuentas con diferencia tras T6.7 |
 
 **Criterio de salida:** T6.7 y T6.8 pasan 20 veces seguidas.
 

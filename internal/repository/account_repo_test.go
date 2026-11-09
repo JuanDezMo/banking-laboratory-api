@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"regexp"
+	"strings"
 	"testing"
 	"uuid"
 
@@ -136,5 +137,65 @@ func TestListAccountsByOwner(t *testing.T) {
 	none, err := repo.ListByOwner(ctx, db, uuid.NewV4().String())
 	if err != nil || none == nil || len(none) != 0 {
 		t.Errorf("no accounts: got %#v, %v; want empty non-nil slice", none, err)
+	}
+}
+
+// T6.2: números → cuentas; un número inexistente no aparece.
+func TestResolveNumbers(t *testing.T) {
+	db := testdb.Open(t)
+	ctx := context.Background()
+	repo := AccountRepo{}
+	owner, _ := UserRepo{}.Create(ctx, db, newUser("ana@mail.com"))
+	a, _ := repo.Create(ctx, db, newAccount(owner.ID, model.AccountSavings), RandomAccountNumber)
+
+	found, err := repo.ResolveNumbers(ctx, db, a.Number, "9999999999")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref, ok := found[a.Number]; !ok || ref.ID != a.ID || ref.OwnerID != owner.ID {
+		t.Errorf("existing number: got %+v, %v", ref, ok)
+	}
+	if _, ok := found["9999999999"]; ok || len(found) != 1 {
+		t.Errorf("missing number must not be found: %v", found)
+	}
+}
+
+// T6.3: el SQL ordena por id y las filas salen (y se bloquean) por id ascendente,
+// sin importar el orden en que se pidan.
+func TestLockByIDs(t *testing.T) {
+	if !strings.Contains(lockByIDsQuery, "ORDER BY id") || !strings.HasSuffix(strings.TrimSpace(lockByIDsQuery), "FOR UPDATE") {
+		t.Fatalf("lock query must order by id and lock: %s", lockByIDsQuery)
+	}
+
+	db := testdb.Open(t)
+	ctx := context.Background()
+	repo := AccountRepo{}
+	owner, _ := UserRepo{}.Create(ctx, db, newUser("ana@mail.com"))
+	low := newAccount(owner.ID, model.AccountSavings)
+	low.ID = "11111111-0000-4000-8000-000000000000"
+	high := newAccount(owner.ID, model.AccountChecking)
+	high.ID = "ffffffff-0000-4000-8000-000000000000"
+	repo.Create(ctx, db, low, RandomAccountNumber)
+	repo.Create(ctx, db, high, RandomAccountNumber)
+
+	for _, ids := range [][]string{{low.ID, high.ID}, {high.ID, low.ID}} {
+		tx, _ := db.BeginTx(ctx, nil)
+		got, err := repo.LockByIDs(ctx, tx, ids...)
+		tx.Rollback()
+		if err != nil || len(got) != 2 || got[0].ID != low.ID || got[1].ID != high.ID {
+			t.Errorf("LockByIDs(%v) = %+v, %v; want ascending ids", ids, got, err)
+		}
+	}
+
+	if _, err := repo.LockByIDs(ctx, db, low.ID, "00000000-0000-4000-8000-000000000000"); err != model.ErrAccountNotFound {
+		t.Errorf("missing id: error = %v, want ErrAccountNotFound", err)
+	}
+
+	// Mientras una transacción tiene la fila, otra no puede tomarla (NOWAIT falla en vez de esperar).
+	tx, _ := db.BeginTx(ctx, nil)
+	defer tx.Rollback()
+	repo.LockByIDs(ctx, tx, low.ID)
+	if _, err := db.ExecContext(ctx, `SELECT 1 FROM accounts WHERE id = $1 FOR UPDATE NOWAIT`, low.ID); err == nil {
+		t.Error("row must be locked by the first transaction")
 	}
 }

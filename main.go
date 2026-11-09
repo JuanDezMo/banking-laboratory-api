@@ -73,7 +73,8 @@ func run() error {
 	authService := service.NewAuthService(db, passwords, tokens)
 	accountService := service.NewAccountService(db)
 	rechargeService := service.NewRechargeService(db)
-	handlers := handler.NewHandlers(authService, accountService, rechargeService, tokens)
+	transferService := service.NewTransferService(db)
+	handlers := handler.NewHandlers(authService, accountService, rechargeService, transferService, tokens)
 
 	server := &http.Server{
 		Addr:              listenAddr,

@@ -52,3 +52,14 @@ func (a *Account) Deposit(amount int64) error {
 	a.BalanceCents += amount
 	return nil
 }
+
+// Withdraw resta amount del saldo. Si el saldo quedaría por debajo del sobregiro permitido
+// (RN-04: savings 0; RN-05: checking -500000), no cambia nada y devuelve ErrInsufficientFunds.
+// amount debe ser positivo y ≤ MaxAmountCents (ya validado), así que la resta no desborda int64.
+func (a *Account) Withdraw(amount int64) error {
+	if a.BalanceCents-amount < -a.OverdraftLimitCents {
+		return ErrInsufficientFunds
+	}
+	a.BalanceCents -= amount
+	return nil
+}

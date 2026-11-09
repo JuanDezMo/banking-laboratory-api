@@ -116,3 +116,65 @@ func (AccountRepo) UpdateBalance(ctx context.Context, db DBTX, a model.Account) 
 	_, err := db.ExecContext(ctx, `UPDATE accounts SET balance_cents = $2 WHERE id = $1`, a.ID, a.BalanceCents)
 	return err
 }
+
+// AccountRef es lo mínimo para validar una cuenta antes de bloquearla: id y dueño.
+type AccountRef struct {
+	ID      string
+	OwnerID string
+}
+
+// ResolveNumbers busca las cuentas con esos números, sin bloquearlas. Devuelve un mapa
+// número → cuenta; un número inexistente no aparece en el mapa.
+func (AccountRepo) ResolveNumbers(ctx context.Context, db DBTX, numbers ...string) (map[string]AccountRef, error) {
+	rows, err := db.QueryContext(ctx,
+		`SELECT number, id, owner_id FROM accounts WHERE number = ANY($1::text[])`, numbers)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	found := make(map[string]AccountRef, len(numbers))
+	for rows.Next() {
+		var number string
+		var ref AccountRef
+		if err := rows.Scan(&number, &ref.ID, &ref.OwnerID); err != nil {
+			return nil, err
+		}
+		found[number] = ref
+	}
+	return found, rows.Err()
+}
+
+// lockByIDsQuery bloquea las filas en orden de id ascendente. Con ORDER BY, PostgreSQL toma
+// los bloqueos en ese orden: dos transferencias cruzadas (A→B y B→A) piden las filas en el
+// mismo orden y no se produce un deadlock.
+const lockByIDsQuery = `SELECT ` + accountColumns + ` FROM accounts
+		  WHERE id = ANY($1::uuid[])
+		  ORDER BY id
+		    FOR UPDATE`
+
+// LockByIDs bloquea las cuentas (FOR UPDATE) hasta el fin de la transacción y las devuelve
+// por id ascendente. Si falta alguna devuelve ErrAccountNotFound.
+func (AccountRepo) LockByIDs(ctx context.Context, tx DBTX, ids ...string) ([]model.Account, error) {
+	rows, err := tx.QueryContext(ctx, lockByIDsQuery, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var accounts []model.Account
+	for rows.Next() {
+		a, err := scanAccount(rows)
+		if err != nil {
+			return nil, err
+		}
+		accounts = append(accounts, a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(accounts) != len(ids) {
+		return nil, model.ErrAccountNotFound
+	}
+	return accounts, nil
+}

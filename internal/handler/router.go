@@ -12,12 +12,13 @@ type Handlers struct {
 	auth      *service.AuthService
 	accounts  *service.AccountService
 	recharges *service.RechargeService
+	transfers *service.TransferService
 	tokens    *service.TokenIssuer // valida el access token en el middleware Auth
 }
 
-func NewHandlers(auth *service.AuthService, accounts *service.AccountService,
-	recharges *service.RechargeService, tokens *service.TokenIssuer) *Handlers {
-	return &Handlers{auth: auth, accounts: accounts, recharges: recharges, tokens: tokens}
+func NewHandlers(auth *service.AuthService, accounts *service.AccountService, recharges *service.RechargeService,
+	transfers *service.TransferService, tokens *service.TokenIssuer) *Handlers {
+	return &Handlers{auth: auth, accounts: accounts, recharges: recharges, transfers: transfers, tokens: tokens}
 }
 
 // NewRouter registra las rutas (Go 1.22+: método y ruta en el patrón) y aplica el middleware.
@@ -31,5 +32,6 @@ func NewRouter(h *Handlers) http.Handler {
 	mux.HandleFunc("GET /accounts", h.Auth(h.ListAccounts))
 	mux.HandleFunc("GET /accounts/{id}", h.Auth(h.GetAccount))
 	mux.HandleFunc("POST /recharge", h.Auth(h.Recharge))
+	mux.HandleFunc("POST /transfers", h.Auth(h.Transfer))
 	return Logging(JSONNotFound(mux))
 }

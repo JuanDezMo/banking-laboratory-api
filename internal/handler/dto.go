@@ -115,3 +115,9 @@ func newMovementResponse(m model.Movement) movementResponse {
 		CreatedAt:    formatTime(m.CreatedAt),
 	}
 }
+
+// transferResponse es la respuesta de POST /transfers.
+type transferResponse struct {
+	TransferOut movementResponse `json:"transferOut"`
+	TransferIn  movementResponse `json:"transferIn"`
+}
