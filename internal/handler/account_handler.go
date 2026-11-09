@@ -1,0 +1,2 @@
+// Endpoints /accounts*.
+package handler

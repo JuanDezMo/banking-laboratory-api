@@ -1,0 +1,44 @@
+services:
+  api:
+    build: .
+    container_name: accounts-api
+    environment:
+      # Dentro de la red de Docker la BD se llama "db", no "localhost".
+      DATABASE_URL: postgres://${POSTGRES_USER:-bank}:${POSTGRES_PASSWORD:-bank}@db:5432/${POSTGRES_DB:-bank}?sslmode=disable
+      # Se toma del .env; si falta, docker compose se detiene con este mensaje.
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required (copy .env.example to .env)}
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    # Imagen oficial, sin Dockerfile propio.
+    image: postgres:16-alpine
+    container_name: accounts-api-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-bank}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-bank}
+      POSTGRES_DB: ${POSTGRES_DB:-bank}
+      # Reloj en UTC (los topes diarios usan el día UTC de la BD, RN-18 a RN-20).
+      TZ: UTC
+      PGTZ: UTC
+    command: ["postgres", "-c", "timezone=UTC", "-c", "log_timezone=UTC"]
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Scripts que se ejecutan solo la primera vez que se crea el volumen (crea bank_test).
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      start_period: 10s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  pgdata:

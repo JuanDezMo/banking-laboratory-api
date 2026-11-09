@@ -1,0 +1,8 @@
+# Fuera del contexto de construcción: secretos, control de versiones y archivos que no se compilan.
+.env
+.git
+.gitignore
+*.md
+docker-compose.yml
+Dockerfile
+.dockerignore
