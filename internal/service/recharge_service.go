@@ -85,7 +85,17 @@ func (s *RechargeService) apply(ctx context.Context, tx *sql.Tx, number string, 
 	if err != nil {
 		return model.Movement{}, err
 	}
-	// Pasos 12 y 13 (topes diarios, RN-18 y RN-19): iteración I7.
+	// Topes diarios: la cuenta ya está bloqueada, así el conteo no cambia hasta el COMMIT (RN-20).
+	count, total, err := s.movements.DailyRecharges(ctx, tx, account.ID)
+	if err != nil {
+		return model.Movement{}, err
+	}
+	if count >= model.MaxDailyRecharges {
+		return model.Movement{}, model.ErrDailyRechargeCountExceeded // paso 12 (RN-18)
+	}
+	if total+amount > model.MaxDailyRechargeCents {
+		return model.Movement{}, model.ErrDailyRechargeAmountExceeded // paso 13 (RN-19)
+	}
 	if err := account.Deposit(amount); err != nil {
 		return model.Movement{}, err // paso 14 (RN-31)
 	}

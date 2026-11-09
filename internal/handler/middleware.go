@@ -1,10 +1,11 @@
-// Middleware: logs, autenticación (I3) y 404/405 en JSON.
+// Middleware: logs, recuperación de pánicos, autenticación y 404/405 en JSON.
 package handler
 
 import (
 	"context"
 	"log/slog"
 	"net/http"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -49,6 +50,29 @@ func Logging(next http.Handler) http.Handler {
 			"status", rec.status,
 			"duration_ms", time.Since(start).Milliseconds(),
 		)
+	})
+}
+
+// Recover convierte un panic en un handler en 500 INTERNAL_ERROR con el cuerpo del
+// catálogo (spec 7.1), en lugar de cortar la conexión. Registra el valor y la pila con
+// slog.Error. Va dentro de Logging, para que el log de la petición muestre status=500.
+// Si el handler ya había empezado a responder, solo se registra: no se puede cambiar el estado.
+func Recover(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			value := recover()
+			if value == nil {
+				return
+			}
+			if value == http.ErrAbortHandler {
+				panic(value) // cancelación deliberada de net/http: se respeta
+			}
+			slog.Error("panic", "method", r.Method, "path", r.URL.Path,
+				"error", value, "stack", string(debug.Stack()))
+			writeJSON(w, http.StatusInternalServerError,
+				errorResponse{Code: model.ErrInternal.Code, Message: model.ErrInternal.Message})
+		}()
+		next.ServeHTTP(w, r)
 	})
 }
 

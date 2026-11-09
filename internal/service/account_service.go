@@ -10,11 +10,12 @@ import (
 	"accounts-api/internal/repository"
 )
 
-// AccountService implementa F-05 a F-07. El rol (403) lo comprueba el handler, antes de
+// AccountService implementa F-05 a F-07 y F-10. El rol (403) lo comprueba el handler, antes de
 // leer el cuerpo (spec 6); aquí se reciben solo peticiones con el rol permitido.
 type AccountService struct {
-	db       *sql.DB
-	accounts repository.AccountRepo
+	db        *sql.DB
+	accounts  repository.AccountRepo
+	movements repository.MovementRepo
 }
 
 func NewAccountService(db *sql.DB) *AccountService {
@@ -56,4 +57,37 @@ func (s *AccountService) Get(ctx context.Context, user model.AuthUser, rawID str
 		return model.Account{}, model.ErrAccountNotFound
 	}
 	return account, nil
+}
+
+// MovementPageSize es el tamaño fijo de una página del historial (F-10).
+const MovementPageSize = repository.MovementPageSize
+
+// MovementPage es una página del historial.
+type MovementPage struct {
+	Page  int
+	Items []model.Movement
+}
+
+// Movements devuelve una página del historial de la cuenta (F-10), en el orden del spec:
+// id (400), page (400) y cuenta existente y propia si es customer (404, RN-24).
+// pagePresent indica si la query trae el parámetro page (ausente → 1, I-12).
+func (s *AccountService) Movements(ctx context.Context, user model.AuthUser, rawID, rawPage string,
+	pagePresent bool) (MovementPage, error) {
+
+	id, err := NormalizeAccountID(rawID) // paso 2
+	if err != nil {
+		return MovementPage{}, err
+	}
+	page, err := ParsePage(rawPage, pagePresent) // paso 3
+	if err != nil {
+		return MovementPage{}, err
+	}
+	if _, err := s.Get(ctx, user, id); err != nil { // paso 4
+		return MovementPage{}, err
+	}
+	items, err := s.movements.ListPage(ctx, s.db, id, page)
+	if err != nil {
+		return MovementPage{}, err
+	}
+	return MovementPage{Page: page, Items: items}, nil
 }

@@ -121,3 +121,10 @@ type transferResponse struct {
 	TransferOut movementResponse `json:"transferOut"`
 	TransferIn  movementResponse `json:"transferIn"`
 }
+
+// movementPageResponse es la respuesta de GET /accounts/{id}/movements.
+type movementPageResponse struct {
+	Page     int                `json:"page"`
+	PageSize int                `json:"pageSize"` // siempre 20
+	Items    []movementResponse `json:"items"`
+}

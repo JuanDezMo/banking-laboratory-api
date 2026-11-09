@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"sync"
 	"testing"
 	"uuid"
 
@@ -249,4 +250,86 @@ func TestRechargeIdempotencyErrors(t *testing.T) {
 			t.Errorf("replay: error = %v, replayed = %v; want stored ErrAccountNotFound", err, replayed)
 		}
 	})
+}
+
+// T7.2: la 6.ª recarga del día → 422; una recarga que supera 300000000 acumulado → 422.
+// Ambos errores se guardan con la key, y no cambian el saldo.
+func TestRechargeDailyLimits(t *testing.T) {
+	t.Run("count", func(t *testing.T) {
+		f := newRechargeFixture(t)
+		for i := range model.MaxDailyRecharges {
+			if _, _, err := f.recharge(newKey(), RechargeInput{f.account.Number, 1000, "cash"}, nil); err != nil {
+				t.Fatalf("recharge %d: %v", i+1, err)
+			}
+		}
+		key := newKey()
+		// La 6.ª falla por cantidad aunque además superaría el monto (paso 12 antes que el 13).
+		if _, _, err := f.recharge(key, RechargeInput{f.account.Number, model.MaxDailyRechargeCents, "salary"}, nil); err != model.ErrDailyRechargeCountExceeded {
+			t.Errorf("6th recharge: error = %v, want ErrDailyRechargeCountExceeded", err)
+		}
+		if !f.keyStored(key) || f.balance(t) != 5000 {
+			t.Errorf("key stored = %v, balance = %d; want true, 5000", f.keyStored(key), f.balance(t))
+		}
+	})
+
+	t.Run("amount", func(t *testing.T) {
+		f := newRechargeFixture(t)
+		if _, _, err := f.recharge(newKey(), RechargeInput{f.account.Number, 200_000_000, "salary"}, nil); err != nil {
+			t.Fatal(err)
+		}
+		key := newKey()
+		if _, _, err := f.recharge(key, RechargeInput{f.account.Number, 100_000_001, "employer_bonus"}, nil); err != model.ErrDailyRechargeAmountExceeded {
+			t.Errorf("over the daily amount: error = %v, want ErrDailyRechargeAmountExceeded", err)
+		}
+		if !f.keyStored(key) || f.balance(t) != 200_000_000 {
+			t.Errorf("key stored = %v, balance = %d", f.keyStored(key), f.balance(t))
+		}
+		// Llegar justo a 300000000 sí se permite.
+		if _, _, err := f.recharge(newKey(), RechargeInput{f.account.Number, 100_000_000, "salary"}, nil); err != nil {
+			t.Errorf("exactly the daily amount: %v", err)
+		}
+	})
+
+	t.Run("yesterday's recharges do not count", func(t *testing.T) {
+		f := newRechargeFixture(t)
+		for range model.MaxDailyRecharges {
+			f.recharge(newKey(), RechargeInput{f.account.Number, 1000, "cash"}, nil)
+		}
+		f.db.Exec(`UPDATE movements SET created_at = created_at - interval '1 day'`)
+		if _, _, err := f.recharge(newKey(), RechargeInput{f.account.Number, 1000, "cash"}, nil); err != nil {
+			t.Errorf("new day: %v", err)
+		}
+	})
+}
+
+// T7.3: seis recargas simultáneas de la misma cuenta → solo 5 se aplican (RN-20).
+func TestRechargeDailyCountConcurrent(t *testing.T) {
+	f := newRechargeFixture(t)
+	results := make(chan error, 6)
+	var wg sync.WaitGroup
+	for range 6 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _, err := f.recharge(newKey(), RechargeInput{f.account.Number, 1000, "cash"}, nil)
+			results <- err
+		}()
+	}
+	wg.Wait()
+	close(results)
+
+	ok, exceeded := 0, 0
+	for err := range results {
+		switch err {
+		case nil:
+			ok++
+		case model.ErrDailyRechargeCountExceeded:
+			exceeded++
+		default:
+			t.Errorf("unexpected error: %v", err)
+		}
+	}
+	if ok != 5 || exceeded != 1 || f.balance(t) != 5000 {
+		t.Errorf("ok = %d, exceeded = %d, balance = %d; want 5, 1, 5000", ok, exceeded, f.balance(t))
+	}
 }

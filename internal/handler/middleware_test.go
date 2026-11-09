@@ -177,3 +177,43 @@ func TestRequireRole(t *testing.T) {
 		t.Errorf("allowed role: must return true without writing a response")
 	}
 }
+
+// TR.1: un panic responde 500 INTERNAL_ERROR en JSON y queda en el log, con status=500.
+func TestRecover(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	boom := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic("boom") })
+	rec := httptest.NewRecorder()
+	Logging(Recover(boom)).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/x", nil))
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+	assertErrorBody(t, rec, "INTERNAL_ERROR", "Internal error")
+	out := logs.String()
+	if !strings.Contains(out, "msg=panic") || !strings.Contains(out, "error=boom") || !strings.Contains(out, "status=500") {
+		t.Errorf("log must record the panic and status=500:\n%s", out)
+	}
+
+	// Sin panic, Recover no cambia nada.
+	ok := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
+	rec = httptest.NewRecorder()
+	Recover(ok).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/x", nil))
+	if rec.Code != http.StatusNoContent || rec.Body.Len() != 0 {
+		t.Errorf("no panic: status = %d, body = %q", rec.Code, rec.Body)
+	}
+}
+
+// http.ErrAbortHandler es la forma estándar de abortar una respuesta: Recover no la convierte en 500.
+func TestRecoverKeepsAbortHandler(t *testing.T) {
+	abort := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic(http.ErrAbortHandler) })
+	defer func() {
+		if v := recover(); v != http.ErrAbortHandler {
+			t.Errorf("recovered %v, want http.ErrAbortHandler to propagate", v)
+		}
+	}()
+	Recover(abort).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/x", nil))
+}

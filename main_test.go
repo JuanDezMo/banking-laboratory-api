@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"strings"
 	"testing"
 )
@@ -32,5 +33,18 @@ func TestLoadConfig(t *testing.T) {
 				t.Fatalf("error = %v, want it to mention %s", err, tc.wantErr)
 			}
 		})
+	}
+}
+
+// TR.2: el pool queda limitado a maxOpenConns.
+func TestConfigurePool(t *testing.T) {
+	db, err := sql.Open("pgx", "postgres://unused") // sql.Open no conecta
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	configurePool(db)
+	if got := db.Stats().MaxOpenConnections; got != 25 {
+		t.Errorf("MaxOpenConnections = %d, want 25", got)
 	}
 }

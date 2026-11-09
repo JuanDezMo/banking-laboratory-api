@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"uuid"
 
 	"accounts-api/internal/model"
 	"accounts-api/internal/service"
@@ -182,5 +183,59 @@ func TestAccountFlow(t *testing.T) {
 		if got[key] != want {
 			t.Errorf("get %s = %v, want %v (same as when created)", key, got[key], want)
 		}
+	}
+}
+
+// T7.6: { page, pageSize: 20, items }; cuenta ajena → 404; page inválida → 400.
+func TestListMovementsEndpoint(t *testing.T) {
+	router, db := newTestRouterDB(t)
+	operator := realOperatorToken(t, db)
+	ana, _ := loginAs(t, router, "ana@mail.com")
+	eva, _ := loginAs(t, router, "eva@mail.com")
+	account := createAccount(t, router, ana, "savings")
+	id := account["id"].(string)
+	for range 3 {
+		doRecharge(router, operator, uuid.NewV4().String(),
+			`{"accountNumber":"`+account["accountNumber"].(string)+`","amount":1000,"rechargeType":"cash"}`)
+	}
+
+	for _, token := range []string{ana, operator} {
+		rec := doAuth(router, http.MethodGet, "/accounts/"+id+"/movements", token, "")
+		var page struct {
+			Page, PageSize int
+			Items          []map[string]any
+		}
+		json.Unmarshal(rec.Body.Bytes(), &page)
+		if rec.Code != http.StatusOK || page.Page != 1 || page.PageSize != 20 || len(page.Items) != 3 ||
+			page.Items[0]["movementType"] != "recharge" || page.Items[0]["accountId"] != id {
+			t.Errorf("status = %d, body = %s", rec.Code, rec.Body)
+		}
+	}
+
+	rec := doAuth(router, http.MethodGet, "/accounts/"+id+"/movements?page=2", ana, "")
+	if rec.Code != http.StatusOK || rec.Body.String() != `{"page":2,"pageSize":20,"items":[]}` {
+		t.Errorf("page 2: status = %d, body = %s", rec.Code, rec.Body)
+	}
+
+	tests := []struct {
+		name, token, path string
+		status            int
+		code, message     string
+	}{
+		{"1 no token", "", "/accounts/abc/movements?page=0", 401, "UNAUTHORIZED", "Missing or invalid token"},
+		{"2 invalid id", ana, "/accounts/abc/movements?page=0", 400, "BAD_REQUEST", "Invalid account id"},
+		{"3 page 0", eva, "/accounts/" + id + "/movements?page=0", 400, "BAD_REQUEST", "Invalid pagination"},
+		{"3 page 1.5", ana, "/accounts/" + id + "/movements?page=1.5", 400, "BAD_REQUEST", "Invalid pagination"},
+		{"3 empty page", ana, "/accounts/" + id + "/movements?page=", 400, "BAD_REQUEST", "Invalid pagination"},
+		{"4 other customer's account", eva, "/accounts/" + id + "/movements", 404, "NOT_FOUND", "Account not found"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := doAuth(router, http.MethodGet, tc.path, tc.token, "")
+			if rec.Code != tc.status {
+				t.Fatalf("status = %d, want %d (body %s)", rec.Code, tc.status, rec.Body)
+			}
+			assertErrorBody(t, rec, tc.code, tc.message)
+		})
 	}
 }

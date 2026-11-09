@@ -29,6 +29,13 @@ const (
 	MaxBalanceCents      = 1_000_000_000_000_000 // saldo máximo de una cuenta (RN-31)
 )
 
+// Topes diarios de recarga por cuenta, sumando todos los tipos (RN-18, RN-19).
+// El día es el día calendario en UTC según la hora de la BD.
+const (
+	MaxDailyRecharges     = 5
+	MaxDailyRechargeCents = 300_000_000
+)
+
 // ParseRechargeType acepta exactamente cash, employer_bonus o salary.
 func ParseRechargeType(value string) (RechargeType, error) {
 	switch t := RechargeType(value); t {

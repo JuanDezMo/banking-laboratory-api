@@ -111,3 +111,47 @@ func TestGetAccount(t *testing.T) {
 		})
 	}
 }
+
+// F-10 en el orden del spec: id (400), page (400), cuenta ajena o inexistente (404).
+func TestAccountMovements(t *testing.T) {
+	f := newTransferFixture(t, 100000) // savings de Ana con una recarga
+	ctx := context.Background()
+	accounts := NewAccountService(f.db)
+	operator := f.operator
+	f.transfer(f.ana, newKey(), TransferInput{f.anaSavings.Number, f.evaSavings.Number, 40000}, nil)
+
+	page, err := accounts.Movements(ctx, f.ana, f.anaSavings.ID, "", false)
+	if err != nil || page.Page != 1 || len(page.Items) != 2 ||
+		page.Items[0].Kind != model.MovementTransferOut || page.Items[1].Kind != model.MovementRecharge {
+		t.Errorf("own history: %+v, %v; want [transfer_out, recharge]", page, err)
+	}
+	if page, err := accounts.Movements(ctx, operator, f.anaSavings.ID, "1", true); err != nil || len(page.Items) != 2 {
+		t.Errorf("operator: %+v, %v", page, err)
+	}
+	if page, err := accounts.Movements(ctx, f.ana, f.anaSavings.ID, "2", true); err != nil || page.Page != 2 || page.Items == nil || len(page.Items) != 0 {
+		t.Errorf("page after the last: %+v, %v; want page 2 with empty items", page, err)
+	}
+
+	tests := []struct {
+		name     string
+		user     model.AuthUser
+		id, page string
+		present  bool
+		want     error
+	}{
+		{"2 invalid id (and invalid page)", f.ana, "abc", "0", true, model.ErrInvalidAccountID},
+		{"3 page 0 (and other's account)", f.eva, f.anaSavings.ID, "0", true, model.ErrInvalidPagination},
+		{"3 empty page", f.ana, f.anaSavings.ID, "", true, model.ErrInvalidPagination},
+		{"3 page +5", f.ana, f.anaSavings.ID, "+5", true, model.ErrInvalidPagination},
+		{"3 page 10001", f.ana, f.anaSavings.ID, "10001", true, model.ErrInvalidPagination},
+		{"4 other customer's account", f.eva, f.anaSavings.ID, "1", true, model.ErrAccountNotFound},
+		{"4 missing account", f.ana, "00000000-0000-4000-8000-000000000000", "", false, model.ErrAccountNotFound},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := accounts.Movements(ctx, tc.user, tc.id, tc.page, tc.present); err != tc.want {
+				t.Errorf("error = %v, want %v", err, tc.want)
+			}
+		})
+	}
+}

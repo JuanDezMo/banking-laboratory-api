@@ -31,7 +31,8 @@ func NewRouter(h *Handlers) http.Handler {
 	mux.HandleFunc("POST /accounts", h.Auth(h.CreateAccount))
 	mux.HandleFunc("GET /accounts", h.Auth(h.ListAccounts))
 	mux.HandleFunc("GET /accounts/{id}", h.Auth(h.GetAccount))
+	mux.HandleFunc("GET /accounts/{id}/movements", h.Auth(h.ListMovements))
 	mux.HandleFunc("POST /recharge", h.Auth(h.Recharge))
 	mux.HandleFunc("POST /transfers", h.Auth(h.Transfer))
-	return Logging(JSONNotFound(mux))
+	return Logging(Recover(JSONNotFound(mux)))
 }

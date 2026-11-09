@@ -27,6 +27,13 @@ const (
 	minJWTSecretLength = 32 // bank-lab-spec.md: JWT_SECRET de al menos 32 caracteres
 	dbPingTimeout      = 5 * time.Second
 	shutdownTimeout    = 10 * time.Second
+
+	// Pool de conexiones. PostgreSQL acepta 100 conexiones por defecto: 25 deja margen para
+	// otras instancias, psql y las migraciones. Si todas están ocupadas, la petición espera
+	// una libre (hasta que venza su contexto) en lugar de fallar.
+	maxOpenConns    = 25
+	maxIdleConns    = 25 // igual que maxOpenConns: no se cierran y reabren conexiones en cada pico
+	connMaxLifetime = 30 * time.Minute
 )
 
 type config struct {
@@ -108,6 +115,7 @@ func openDB(ctx context.Context, url string) (*sql.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
+	configurePool(db)
 	pingCtx, cancel := context.WithTimeout(ctx, dbPingTimeout)
 	defer cancel()
 	if err := db.PingContext(pingCtx); err != nil {
@@ -115,6 +123,13 @@ func openDB(ctx context.Context, url string) (*sql.DB, error) {
 		return nil, fmt.Errorf("connect to database: %w", err)
 	}
 	return db, nil
+}
+
+// configurePool limita las conexiones abiertas a la BD (ver maxOpenConns).
+func configurePool(db *sql.DB) {
+	db.SetMaxOpenConns(maxOpenConns)
+	db.SetMaxIdleConns(maxIdleConns)
+	db.SetConnMaxLifetime(connMaxLifetime)
 }
 
 // serve atiende peticiones hasta que ctx se cancela y luego apaga el servidor de forma ordenada:

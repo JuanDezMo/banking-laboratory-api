@@ -49,7 +49,8 @@ Plan para implementar la API del laboratorio bancario en Go, en esta carpeta (`g
 | I4 | ✅ Cuentas (F-05 a F-07) | 7 | 10 |
 | I5 | ✅ Recarga con idempotencia (F-08 sin topes) | 10 | 17 |
 | I6 | ✅ Transferencias (F-09) | 8 | 13 |
-| I7 | Topes diarios e historial (F-08 completa, F-10) | 7 | 12 |
+| I7 | ✅ Topes diarios e historial (F-08 completa, F-10) | 7 | 12 |
+| IR | ✅ Robustez: pánicos y pool de conexiones (agregada tras I7) | 2 | 2 |
 | I8 | Interfaces y pruebas sin BD | 5 | 9 |
 | I9 | Opcional: extensiones | 5 | 10 |
 | IF | Verificación del contrato (caja negra) | 8 | 16 |
@@ -218,15 +219,28 @@ Plan para implementar la API del laboratorio bancario en Go, en esta carpeta (`g
 
 | ID | Tarea | Est. | Medición |
 |---|---|---|---|
-| T7.1 | Repo: contar y sumar recargas del día UTC (`date_trunc('day', now() AT TIME ZONE 'UTC')`) | S | Prueba: 2 recargas hoy + 1 insertada ayer → cuenta 2 |
-| T7.2 | `RechargeService`: pasos de validación de los topes (cantidad y monto) | S | Prueba: 6.ª recarga → `422`; recarga que supera 300000000 acumulado → `422` |
-| T7.3 | Prueba: seis recargas simultáneas → solo 5 se aplican | S | `go test -race -count=10` en verde; saldo = 5 recargas |
-| T7.4 | `movement_repo`: página de 20 (`LIMIT 20 OFFSET`, orden I-11) | XS | Prueba con 25 movimientos: página 1 = 20, página 2 = 5, página 3 = 0 |
-| T7.5 | DTO de movimiento: `movementType` + `details` | S | Prueba: recarga y transferencia serializan igual que los ejemplos de `openapi.yaml` |
-| T7.6 | **F-10** `GET /accounts/{id}/movements` | XS | `curl` → `{ page, pageSize: 20, items }`; cuenta ajena → `404` |
-| T7.7 | Revisión de I-01 a I-14 sobre todo lo implementado | S | Lista de verificación con 14 filas marcadas, cada una con su prueba o `curl` |
+| T7.1 | ✅ Repo: contar y sumar recargas del día UTC (`date_trunc('day', now() AT TIME ZONE 'UTC')`) | S | Prueba: 2 recargas hoy + 1 insertada ayer → cuenta 2 |
+| T7.2 | ✅ `RechargeService`: pasos de validación de los topes (cantidad y monto) | S | Prueba: 6.ª recarga → `422`; recarga que supera 300000000 acumulado → `422` |
+| T7.3 | ✅ Prueba: seis recargas simultáneas → solo 5 se aplican | S | `go test -race -count=10` en verde; saldo = 5 recargas |
+| T7.4 | ✅ `movement_repo`: página de 20 (`LIMIT 20 OFFSET`, orden I-11) | XS | Prueba con 25 movimientos: página 1 = 20, página 2 = 5, página 3 = 0 |
+| T7.5 | ✅ DTO de movimiento: `movementType` + `details` | S | Prueba: recarga y transferencia serializan igual que los ejemplos de `openapi.yaml` |
+| T7.6 | ✅ **F-10** `GET /accounts/{id}/movements` | XS | `curl` → `{ page, pageSize: 20, items }`; cuenta ajena → `404` |
+| T7.7 | ✅ Revisión de I-01 a I-14 sobre todo lo implementado | S | Lista de verificación con 14 filas marcadas, cada una con su prueba o `curl` (`VERIFICACION-INTEROPERABILIDAD.md`, incluye I-15) |
 
 **Criterio de salida:** F-01 a F-10 completos; `go test -race ./...` en verde.
+
+---
+
+## IR: Robustez
+
+**Objetivo:** que un error inesperado o una carga alta no rompan el contrato. Agregada tras I7: no estaba en el plan original.
+
+| ID | Tarea | Est. | Medición |
+|---|---|---|---|
+| TR.1 | ✅ Middleware `Recover`: un `panic` en un handler responde `500 INTERNAL_ERROR` en JSON y se registra con `slog.Error` (spec 7.1) | XS | Prueba: handler que hace `panic` → 500 con `{code, message}` del catálogo; el log de `Logging` muestra `status=500` |
+| TR.2 | ✅ Límites del pool de `*sql.DB`: `SetMaxOpenConns`, `SetMaxIdleConns`, `SetConnMaxLifetime` | XS | Prueba: `db.Stats().MaxOpenConnections` = 25; 200 peticiones simultáneas → 0 respuestas 500 y ≤ 25 conexiones de la API en `pg_stat_activity` |
+
+**Criterio de salida:** `go test -race ./...` en verde y las dos mediciones cumplidas.
 
 ---
 

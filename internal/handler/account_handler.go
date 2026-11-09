@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"accounts-api/internal/model"
+	"accounts-api/internal/service"
 )
 
 // CreateAccount atiende POST /accounts (F-05). Solo customer.
@@ -55,4 +56,28 @@ func (h *Handlers) GetAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, newAccountResponse(account))
+}
+
+// ListMovements atiende GET /accounts/{id}/movements?page=N (F-10). customer (las suyas) y operator.
+func (h *Handlers) ListMovements(w http.ResponseWriter, r *http.Request) {
+	pages, present := r.URL.Query()["page"]
+	rawPage := ""
+	if present {
+		rawPage = pages[0] // si se repite, vale el primero
+	}
+
+	result, err := h.accounts.Movements(r.Context(), currentUser(r), r.PathValue("id"), rawPage, present)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	items := make([]movementResponse, len(result.Items)) // página vacía: "items": [] (no null)
+	for i, m := range result.Items {
+		items[i] = newMovementResponse(m)
+	}
+	writeJSON(w, http.StatusOK, movementPageResponse{
+		Page:     result.Page,
+		PageSize: service.MovementPageSize,
+		Items:    items,
+	})
 }
