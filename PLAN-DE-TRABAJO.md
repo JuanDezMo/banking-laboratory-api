@@ -46,7 +46,7 @@ Plan para implementar la API del laboratorio bancario en Go, en esta carpeta (`g
 | I1 | ✅ Base común: errores, respuestas, `decodeObject`, validaciones | 12 | 19 |
 | I2 | ✅ Registro y login (F-01, F-02) | 13 | 23 |
 | I3 | ✅ Sesión: refresh, auth, logout (F-03, F-04) | 7 | 11 |
-| I4 | Cuentas (F-05 a F-07) | 7 | 10 |
+| I4 | ✅ Cuentas (F-05 a F-07) | 7 | 10 |
 | I5 | Recarga con idempotencia (F-08 sin topes) | 10 | 17 |
 | I6 | Transferencias (F-09) | 8 | 13 |
 | I7 | Topes diarios e historial (F-08 completa, F-10) | 7 | 12 |
@@ -156,13 +156,13 @@ Plan para implementar la API del laboratorio bancario en Go, en esta carpeta (`g
 
 | ID | Tarea | Est. | Medición |
 |---|---|---|---|
-| T4.1 | `account_repo`: crear con número aleatorio de 10 dígitos; reintento ante `UNIQUE` (máx. 5) | S | Prueba con generador falso que repite número: reintenta y crea; 5 colisiones → error |
-| T4.2 | `account_repo`: buscar por id | XS | Prueba de integración: existe / no existe |
-| T4.3 | `account_repo`: listar por dueño (orden I-11) | XS | Prueba: 3 cuentas creadas salen en el orden de I-11 |
-| T4.4 | **F-05** `POST /accounts` | S | `curl` customer → `201`; operator → `403`; `accountType` inválido → `400` |
-| T4.5 | **F-06** `GET /accounts` | XS | `curl` → `200` solo con las cuentas propias |
-| T4.6 | **F-07** `GET /accounts/{id}` (ajena → 404, RN-24) | XS | `curl` propia → `200`; ajena → `404`; id no UUID → `400` |
-| T4.7 | Prueba de integración del flujo: registro → login → crear → listar → consultar | S | La prueba pasa contra `bank_test` |
+| T4.1 | ✅ `account_repo`: crear con número aleatorio de 10 dígitos; reintento ante `UNIQUE` (máx. 5) | S | Prueba con generador falso que repite número: reintenta y crea; 5 colisiones → error |
+| T4.2 | ✅ `account_repo`: buscar por id | XS | Prueba de integración: existe / no existe |
+| T4.3 | ✅ `account_repo`: listar por dueño (orden I-11) | XS | Prueba: 3 cuentas creadas salen en el orden de I-11 |
+| T4.4 | ✅ **F-05** `POST /accounts` | S | `curl` customer → `201`; operator → `403`; `accountType` inválido → `400` |
+| T4.5 | ✅ **F-06** `GET /accounts` | XS | `curl` → `200` solo con las cuentas propias |
+| T4.6 | ✅ **F-07** `GET /accounts/{id}` (ajena → 404, RN-24) | XS | `curl` propia → `200`; ajena → `404`; id no UUID → `400` |
+| T4.7 | ✅ Prueba de integración del flujo: registro → login → crear → listar → consultar | S | La prueba pasa contra `bank_test` |
 
 **Criterio de salida:** F-01 a F-07 completos; `go test ./...` en verde.
 

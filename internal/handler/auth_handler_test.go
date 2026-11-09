@@ -20,7 +20,7 @@ func newTestRouter(t *testing.T) http.Handler {
 	db := testdb.Open(t)
 	tokens := service.NewTokenIssuer(testSecret)
 	auth := service.NewAuthService(db, service.NewPasswordHasher(4), tokens)
-	return NewRouter(NewHandlers(auth, tokens))
+	return NewRouter(NewHandlers(auth, service.NewAccountService(db), tokens))
 }
 
 // do envía una petición JSON al router y devuelve la respuesta.
@@ -128,8 +128,14 @@ func TestAuthRoutesMethodNotAllowed(t *testing.T) {
 // loginPair registra y hace login de Ana; devuelve el par de tokens del JSON.
 func loginPair(t *testing.T, router http.Handler) (access, refresh string) {
 	t.Helper()
-	do(router, http.MethodPost, "/auth/register", `{"name":"Ana","email":"ana@mail.com","password":"S3gura2026"}`)
-	rec := do(router, http.MethodPost, "/auth/login", `{"email":"ana@mail.com","password":"S3gura2026"}`)
+	return loginAs(t, router, "ana@mail.com")
+}
+
+// loginAs registra un customer con el email dado, hace login y devuelve sus tokens.
+func loginAs(t *testing.T, router http.Handler, email string) (access, refresh string) {
+	t.Helper()
+	do(router, http.MethodPost, "/auth/register", `{"name":"Cliente","email":"`+email+`","password":"S3gura2026"}`)
+	rec := do(router, http.MethodPost, "/auth/login", `{"email":"`+email+`","password":"S3gura2026"}`)
 	var pair struct{ AccessToken, RefreshToken string }
 	if err := json.Unmarshal(rec.Body.Bytes(), &pair); err != nil || rec.Code != http.StatusOK {
 		t.Fatalf("login: status = %d, body = %s", rec.Code, rec.Body)
@@ -141,7 +147,9 @@ func loginPair(t *testing.T, router http.Handler) (access, refresh string) {
 func doAuth(router http.Handler, method, path, access, body string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+access)
+	if access != "" {
+		req.Header.Set("Authorization", "Bearer "+access)
+	}
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	return rec

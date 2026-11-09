@@ -52,3 +52,28 @@ func newTokenPairResponse(p service.TokenPair) tokenPairResponse {
 		ExpiresIn:    p.ExpiresIn,
 	}
 }
+
+// accountResponse es la forma de una cuenta (contrato, sección 1). El dueño y el sobregiro
+// no se exponen.
+type accountResponse struct {
+	ID            string `json:"id"`
+	AccountNumber string `json:"accountNumber"`
+	AccountType   string `json:"accountType"`
+	Balance       int64  `json:"balance"` // centavos
+	CreatedAt     string `json:"createdAt"`
+}
+
+func newAccountResponse(a model.Account) accountResponse {
+	return accountResponse{
+		ID:            a.ID,
+		AccountNumber: a.Number,
+		AccountType:   string(a.Kind),
+		Balance:       a.BalanceCents,
+		CreatedAt:     formatTime(a.CreatedAt),
+	}
+}
+
+// accountListResponse es la respuesta de GET /accounts.
+type accountListResponse struct {
+	Items []accountResponse `json:"items"`
+}
