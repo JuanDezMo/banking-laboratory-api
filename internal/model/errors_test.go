@@ -88,3 +88,24 @@ func TestLoginBlockedError(t *testing.T) {
 		t.Errorf("Error() = %q, want %q", err.Error(), want)
 	}
 }
+
+func TestStorableErrors(t *testing.T) {
+	for _, e := range []*AppError{ErrAccountNotFound, ErrInsufficientFunds, ErrCashLimitExceeded,
+		ErrDailyRechargeCountExceeded, ErrDailyRechargeAmountExceeded, ErrBalanceLimitExceeded} {
+		if got, ok := StorableError(fmt.Errorf("wrapped: %w", e)); !ok || got != e {
+			t.Errorf("%s: StorableError = %v, %v", e.Code, got, ok)
+		}
+		if got, ok := StoredError(e.Code); !ok || got != e {
+			t.Errorf("%s: StoredError = %v, %v", e.Code, got, ok)
+		}
+	}
+	// Los errores de los pasos 1 a 9 no se guardan.
+	for _, e := range []error{ErrInvalidRequestBody, ErrInvalidAmount, ErrForbidden, ErrIdempotencyKeyReused, errors.New("db down")} {
+		if _, ok := StorableError(e); ok {
+			t.Errorf("%v must not be storable", e)
+		}
+	}
+	if _, ok := StoredError("BAD_REQUEST"); ok {
+		t.Error("BAD_REQUEST must not be a stored code")
+	}
+}

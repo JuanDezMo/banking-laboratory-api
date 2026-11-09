@@ -41,3 +41,14 @@ type Account struct {
 	OverdraftLimitCents int64
 	CreatedAt           time.Time
 }
+
+// Deposit suma amount al saldo. Si el saldo superaría el máximo (RN-31), no cambia nada
+// y devuelve ErrBalanceLimitExceeded. amount debe ser positivo y ≤ MaxAmountCents (ya validado),
+// así que la suma no desborda int64.
+func (a *Account) Deposit(amount int64) error {
+	if a.BalanceCents+amount > MaxBalanceCents {
+		return ErrBalanceLimitExceeded
+	}
+	a.BalanceCents += amount
+	return nil
+}

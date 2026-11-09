@@ -72,7 +72,8 @@ func run() error {
 	tokens := service.NewTokenIssuer(cfg.jwtSecret)
 	authService := service.NewAuthService(db, passwords, tokens)
 	accountService := service.NewAccountService(db)
-	handlers := handler.NewHandlers(authService, accountService, tokens)
+	rechargeService := service.NewRechargeService(db)
+	handlers := handler.NewHandlers(authService, accountService, rechargeService, tokens)
 
 	server := &http.Server{
 		Addr:              listenAddr,

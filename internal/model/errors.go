@@ -2,7 +2,10 @@
 // model no sabe nada de HTTP: el estado HTTP de cada código lo decide handler/respond.go.
 package model
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 // AppError es un error del catálogo: un código estable y un mensaje en inglés.
 type AppError struct {
@@ -73,3 +76,36 @@ func (e *LoginBlockedError) Error() string {
 }
 
 func (e *LoginBlockedError) Unwrap() error { return ErrTooManyLoginAttempts }
+
+// storableErrors son los errores de negocio (404 y 422) que se guardan con la
+// idempotency key y se repiten igual al reintentar (spec 6 y 8.1).
+var storableErrors = map[string]*AppError{}
+
+func init() {
+	for _, e := range []*AppError{
+		ErrAccountNotFound,
+		ErrInsufficientFunds,
+		ErrCashLimitExceeded,
+		ErrDailyRechargeCountExceeded,
+		ErrDailyRechargeAmountExceeded,
+		ErrBalanceLimitExceeded,
+	} {
+		storableErrors[e.Code] = e
+	}
+}
+
+// StorableError devuelve el AppError si err es un error que se guarda con la idempotency key.
+func StorableError(err error) (*AppError, bool) {
+	var appErr *AppError
+	if !errors.As(err, &appErr) {
+		return nil, false
+	}
+	stored, ok := storableErrors[appErr.Code]
+	return stored, ok
+}
+
+// StoredError devuelve el error del catálogo con ese code, guardado con una idempotency key.
+func StoredError(code string) (*AppError, bool) {
+	e, ok := storableErrors[code]
+	return e, ok
+}

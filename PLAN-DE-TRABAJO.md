@@ -47,7 +47,7 @@ Plan para implementar la API del laboratorio bancario en Go, en esta carpeta (`g
 | I2 | ✅ Registro y login (F-01, F-02) | 13 | 23 |
 | I3 | ✅ Sesión: refresh, auth, logout (F-03, F-04) | 7 | 11 |
 | I4 | ✅ Cuentas (F-05 a F-07) | 7 | 10 |
-| I5 | Recarga con idempotencia (F-08 sin topes) | 10 | 17 |
+| I5 | ✅ Recarga con idempotencia (F-08 sin topes) | 10 | 17 |
 | I6 | Transferencias (F-09) | 8 | 13 |
 | I7 | Topes diarios e historial (F-08 completa, F-10) | 7 | 12 |
 | I8 | Interfaces y pruebas sin BD | 5 | 9 |
@@ -174,16 +174,16 @@ Plan para implementar la API del laboratorio bancario en Go, en esta carpeta (`g
 
 | ID | Tarea | Est. | Medición |
 |---|---|---|---|
-| T5.1 | Migración `002_movements_idempotency.sql`: `movements` | XS | `\d movements` coincide con spec 3.5 |
-| T5.2 | Misma migración: `idempotency_keys` | XS | `\d idempotency_keys` coincide con spec 3.6 |
-| T5.3 | `model`: `Movement`, `MovementType`, `RechargeType`; `Account.Deposit` con saldo máximo (RN-31) | S | Prueba de tabla: depósito que supera 1e15 → error |
-| T5.4 | `movement_repo`: insertar y leer por ids | S | Prueba de integración: lo insertado se lee igual (fecha con 3 decimales) |
-| T5.5 | `idempotency_repo`: buscar (24 h) y guardar resultado | S | Prueba: guardado se encuentra; con fecha de hace 25 h no |
-| T5.6 | `idempotency_repo`: `TryLock` con `pg_try_advisory_xact_lock` | S | Prueba: dos transacciones con la misma key → la segunda obtiene `false` |
-| T5.7 | Hash de la petición: SHA-256 de campos en orden fijo; cuerpo inválido → `"invalid"` | XS | Prueba: mismos campos en otro orden JSON → mismo hash |
-| T5.8 | `RechargeService`: validaciones, transacción, savepoint | S | Prueba de integración: 1 caso por error de F-08 (sin topes) |
-| T5.9 | **F-08** handler: rol, `Idempotency-Key`, `Idempotent-Replayed: true` | S | `curl` 2 veces con la misma key → mismo id; la 2.ª con `Idempotent-Replayed: true` |
-| T5.10 | Pruebas: misma key con otro monto → `422`; key en curso → `409`; `cash` > 300000 → `422` | S | 3 pruebas de integración en verde |
+| T5.1 | ✅ Migración `002_movements_idempotency.sql`: `movements` | XS | `\d movements` coincide con spec 3.5 |
+| T5.2 | ✅ Misma migración: `idempotency_keys` | XS | `\d idempotency_keys` coincide con spec 3.6 |
+| T5.3 | ✅ `model`: `Movement`, `MovementType`, `RechargeType`; `Account.Deposit` con saldo máximo (RN-31) | S | Prueba de tabla: depósito que supera 1e15 → error |
+| T5.4 | ✅ `movement_repo`: insertar y leer por ids | S | Prueba de integración: lo insertado se lee igual (fecha con 3 decimales) |
+| T5.5 | ✅ `idempotency_repo`: buscar (24 h) y guardar resultado | S | Prueba: guardado se encuentra; con fecha de hace 25 h no |
+| T5.6 | ✅ `idempotency_repo`: `TryLock` con `pg_try_advisory_xact_lock` | S | Prueba: dos transacciones con la misma key → la segunda obtiene `false` |
+| T5.7 | ✅ Hash de la petición: SHA-256 de campos en orden fijo; cuerpo inválido → `"invalid"` | XS | Prueba: mismos campos en otro orden JSON → mismo hash |
+| T5.8 | ✅ `RechargeService`: validaciones, transacción, savepoint | S | Prueba de integración: 1 caso por error de F-08 (sin topes) |
+| T5.9 | ✅ **F-08** handler: rol, `Idempotency-Key`, `Idempotent-Replayed: true` | S | `curl` 2 veces con la misma key → mismo id; la 2.ª con `Idempotent-Replayed: true` |
+| T5.10 | ✅ Pruebas: misma key con otro monto → `422`; key en curso → `409`; `cash` > 300000 → `422` | S | 3 pruebas de integración en verde |
 
 **Criterio de salida:** repetir una recarga no cambia el saldo (`select balance` igual antes y después de la repetición).
 

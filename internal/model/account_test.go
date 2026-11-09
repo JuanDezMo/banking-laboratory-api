@@ -30,3 +30,40 @@ func TestParseAccountType(t *testing.T) {
 		}
 	}
 }
+
+func TestDeposit(t *testing.T) {
+	tests := []struct {
+		name         string
+		balance, add int64
+		want         int64
+		wantErr      error
+	}{
+		{"normal", 0, 150000, 150000, nil},
+		{"from negative checking", -500000, 100, -499900, nil},
+		{"exactly the maximum", MaxBalanceCents - 1000, 1000, MaxBalanceCents, nil},
+		{"one cent over the maximum", MaxBalanceCents - 1000, 1001, MaxBalanceCents - 1000, ErrBalanceLimitExceeded},
+		{"max balance plus max amount", MaxBalanceCents, MaxAmountCents, MaxBalanceCents, ErrBalanceLimitExceeded},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			a := Account{BalanceCents: tc.balance}
+			err := a.Deposit(tc.add)
+			if err != tc.wantErr || a.BalanceCents != tc.want {
+				t.Errorf("balance = %d, err = %v; want %d, %v", a.BalanceCents, err, tc.want, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestParseRechargeType(t *testing.T) {
+	for _, valid := range []string{"cash", "employer_bonus", "salary"} {
+		if got, err := ParseRechargeType(valid); err != nil || string(got) != valid {
+			t.Errorf("%q: got %q, %v", valid, got, err)
+		}
+	}
+	for _, invalid := range []string{"", "Cash", "gift", "employer-bonus", " salary"} {
+		if _, err := ParseRechargeType(invalid); err != ErrInvalidRechargeType {
+			t.Errorf("%q: error = %v, want ErrInvalidRechargeType", invalid, err)
+		}
+	}
+}

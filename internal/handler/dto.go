@@ -77,3 +77,41 @@ func newAccountResponse(a model.Account) accountResponse {
 type accountListResponse struct {
 	Items []accountResponse `json:"items"`
 }
+
+// movementResponse es la forma de un movimiento (contrato, sección 1). amount siempre es
+// positivo; el signo lo da movementType.
+type movementResponse struct {
+	ID           string `json:"id"`
+	AccountID    string `json:"accountId"`
+	MovementType string `json:"movementType"`
+	Amount       int64  `json:"amount"`
+	Details      any    `json:"details"`
+	CreatedAt    string `json:"createdAt"`
+}
+
+// Detalles según el tipo de movimiento.
+type rechargeDetails struct {
+	RechargeType string `json:"rechargeType"`
+}
+
+type transferDetails struct {
+	RelatedAccountID string `json:"relatedAccountId"`
+}
+
+func newMovementResponse(m model.Movement) movementResponse {
+	var details any = struct{}{} // withdrawal: sin detalles
+	switch m.Kind {
+	case model.MovementRecharge:
+		details = rechargeDetails{RechargeType: string(m.RechargeType)}
+	case model.MovementTransferIn, model.MovementTransferOut:
+		details = transferDetails{RelatedAccountID: m.RelatedAccountID}
+	}
+	return movementResponse{
+		ID:           m.ID,
+		AccountID:    m.AccountID,
+		MovementType: string(m.Kind),
+		Amount:       m.AmountCents,
+		Details:      details,
+		CreatedAt:    formatTime(m.CreatedAt),
+	}
+}

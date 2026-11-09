@@ -146,3 +146,14 @@ func isASCIIDigits(s string) bool {
 func isHexDigit(c byte) bool {
 	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
 }
+
+// ValidateAmount exige un monto mayor que 0 (RN-07, RN-10) y como máximo 1e12 (RN-30).
+func ValidateAmount(amount int64) error {
+	if amount <= 0 {
+		return model.ErrInvalidAmount
+	}
+	if amount > model.MaxAmountCents {
+		return model.ErrAmountTooLarge
+	}
+	return nil
+}

@@ -98,3 +98,21 @@ func scanAccount(row scanner) (model.Account, error) {
 	err := row.Scan(&a.ID, &a.OwnerID, &a.Number, &a.Kind, &a.BalanceCents, &a.OverdraftLimitCents, &a.CreatedAt)
 	return a, err
 }
+
+// LockByNumber busca una cuenta por número y bloquea su fila hasta el fin de la
+// transacción (FOR UPDATE). Si no existe devuelve ErrAccountNotFound.
+func (AccountRepo) LockByNumber(ctx context.Context, tx DBTX, number string) (model.Account, error) {
+	a, err := scanAccount(tx.QueryRowContext(ctx,
+		`SELECT `+accountColumns+` FROM accounts WHERE number = $1 FOR UPDATE`, number))
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.Account{}, model.ErrAccountNotFound
+	}
+	return a, err
+}
+
+// UpdateBalance guarda el saldo de la cuenta. Los CHECK de la tabla son la última defensa
+// de RN-04, RN-05 y RN-31.
+func (AccountRepo) UpdateBalance(ctx context.Context, db DBTX, a model.Account) error {
+	_, err := db.ExecContext(ctx, `UPDATE accounts SET balance_cents = $2 WHERE id = $1`, a.ID, a.BalanceCents)
+	return err
+}

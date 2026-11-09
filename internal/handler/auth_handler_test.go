@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -17,10 +18,18 @@ const testSecret = "test-secret-with-at-least-32-characters"
 // newTestRouter arma el router completo contra la BD de pruebas.
 func newTestRouter(t *testing.T) http.Handler {
 	t.Helper()
+	router, _ := newTestRouterDB(t)
+	return router
+}
+
+// newTestRouterDB es como newTestRouter y además devuelve la BD.
+func newTestRouterDB(t *testing.T) (http.Handler, *sql.DB) {
+	t.Helper()
 	db := testdb.Open(t)
 	tokens := service.NewTokenIssuer(testSecret)
 	auth := service.NewAuthService(db, service.NewPasswordHasher(4), tokens)
-	return NewRouter(NewHandlers(auth, service.NewAccountService(db), tokens))
+	handlers := NewHandlers(auth, service.NewAccountService(db), service.NewRechargeService(db), tokens)
+	return NewRouter(handlers), db
 }
 
 // do envía una petición JSON al router y devuelve la respuesta.

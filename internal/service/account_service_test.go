@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 	"testing"
 
@@ -12,7 +13,12 @@ import (
 // newAccountFixture crea el service y dos customers (Ana y Eva) directamente con AuthService.
 func newAccountFixture(t *testing.T) (s *AccountService, ana, eva model.AuthUser) {
 	t.Helper()
-	db := testdb.Open(t)
+	return newAccountFixtureDB(t, testdb.Open(t))
+}
+
+// newAccountFixtureDB es como newAccountFixture, sobre una BD ya abierta.
+func newAccountFixtureDB(t *testing.T, db *sql.DB) (s *AccountService, ana, eva model.AuthUser) {
+	t.Helper()
 	auth := NewAuthService(db, NewPasswordHasher(4), NewTokenIssuer(testSecret))
 	ctx := context.Background()
 	a, err := auth.Register(ctx, RegisterInput{"Ana", "ana@mail.com", "S3gura2026"})
