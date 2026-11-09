@@ -104,3 +104,56 @@ func (UserRepo) CreateRefreshToken(ctx context.Context, db DBTX, userID, tokenHa
 		uuid.NewV4().String(), userID, tokenHash)
 	return err
 }
+
+// ActiveRefreshToken es un refresh token vigente, con el rol actual de su usuario.
+type ActiveRefreshToken struct {
+	ID     string
+	UserID string
+	Role   model.Role
+}
+
+// LockActiveRefreshToken busca por hash un refresh token no revocado ni vencido (hora de
+// la BD) y bloquea su fila hasta que termine la transacción. Si no existe devuelve nil, sin error.
+//
+// Si dos transacciones piden el mismo token, la segunda espera el bloqueo; cuando la primera
+// lo revoca y confirma, PostgreSQL vuelve a evaluar el WHERE y la segunda ya no lo encuentra.
+// Debe llamarse dentro de una transacción (*sql.Tx).
+func (UserRepo) LockActiveRefreshToken(ctx context.Context, tx DBTX, tokenHash string) (*ActiveRefreshToken, error) {
+	var t ActiveRefreshToken
+	err := tx.QueryRowContext(ctx,
+		`SELECT rt.id, rt.user_id, u.role
+		   FROM refresh_tokens rt
+		   JOIN users u ON u.id = rt.user_id
+		  WHERE rt.token_hash = $1 AND rt.revoked_at IS NULL AND rt.expires_at > now()
+		    FOR UPDATE OF rt`, tokenHash).
+		Scan(&t.ID, &t.UserID, &t.Role)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &t, nil
+}
+
+// RevokeRefreshToken marca como revocado el refresh token con ese id.
+func (UserRepo) RevokeRefreshToken(ctx context.Context, db DBTX, id string) error {
+	_, err := db.ExecContext(ctx,
+		`UPDATE refresh_tokens SET revoked_at = date_trunc('milliseconds', now()) WHERE id = $1`, id)
+	return err
+}
+
+// RevokeUserRefreshToken revoca el refresh token si está vigente y es del usuario dado.
+// Devuelve false si no había ninguno que cumpla las tres condiciones. Es una sola
+// sentencia UPDATE, así que dos logouts simultáneos no pueden revocarlo los dos.
+func (UserRepo) RevokeUserRefreshToken(ctx context.Context, db DBTX, userID, tokenHash string) (bool, error) {
+	res, err := db.ExecContext(ctx,
+		`UPDATE refresh_tokens SET revoked_at = date_trunc('milliseconds', now())
+		  WHERE token_hash = $1 AND user_id = $2 AND revoked_at IS NULL AND expires_at > now()`,
+		tokenHash, userID)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
+}

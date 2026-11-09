@@ -47,3 +47,36 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, newTokenPairResponse(pair))
 }
+
+// Refresh atiende POST /auth/refresh (F-03). Es público.
+func (h *Handlers) Refresh(w http.ResponseWriter, r *http.Request) {
+	body := decodeObject(r)
+	token := body.String("refreshToken")
+	if err := body.Err(); err != nil {
+		writeError(w, err)
+		return
+	}
+
+	pair, err := h.auth.Refresh(r.Context(), token)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, newTokenPairResponse(pair))
+}
+
+// Logout atiende POST /auth/logout (F-04). El middleware Auth ya validó el access token (paso 1).
+func (h *Handlers) Logout(w http.ResponseWriter, r *http.Request) {
+	body := decodeObject(r)
+	token := body.String("refreshToken")
+	if err := body.Err(); err != nil {
+		writeError(w, err) // paso 2
+		return
+	}
+
+	if err := h.auth.Logout(r.Context(), currentUser(r), token); err != nil {
+		writeError(w, err) // paso 3
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

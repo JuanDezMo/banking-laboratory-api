@@ -107,3 +107,62 @@ func TestCreateRefreshToken(t *testing.T) {
 		t.Errorf("refresh token lasts %.3f days, want 7", days)
 	}
 }
+
+// T3.1: un token vigente se encuentra; revocado o vencido, no.
+func TestLockActiveRefreshToken(t *testing.T) {
+	db := testdb.Open(t)
+	ctx := context.Background()
+	repo := UserRepo{}
+	user, _ := repo.Create(ctx, db, newUser("ana@mail.com"))
+	repo.CreateRefreshToken(ctx, db, user.ID, "hash-1")
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	found, err := repo.LockActiveRefreshToken(ctx, tx, "hash-1")
+	if err != nil || found == nil || found.UserID != user.ID || found.Role != model.RoleCustomer {
+		t.Fatalf("active token: got %+v, %v", found, err)
+	}
+	if err := repo.RevokeRefreshToken(ctx, tx, found.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Revocado: ya no es válido.
+	if again, err := repo.LockActiveRefreshToken(ctx, db, "hash-1"); err != nil || again != nil {
+		t.Errorf("revoked token: got %+v, %v; want nil, nil", again, err)
+	}
+
+	// Inexistente y vencido: tampoco.
+	if missing, err := repo.LockActiveRefreshToken(ctx, db, "no-existe"); err != nil || missing != nil {
+		t.Errorf("missing token: got %+v, %v; want nil, nil", missing, err)
+	}
+	repo.CreateRefreshToken(ctx, db, user.ID, "hash-expired")
+	db.ExecContext(ctx, `UPDATE refresh_tokens SET expires_at = now() - interval '1 second' WHERE token_hash = 'hash-expired'`)
+	if expired, err := repo.LockActiveRefreshToken(ctx, db, "hash-expired"); err != nil || expired != nil {
+		t.Errorf("expired token: got %+v, %v; want nil, nil", expired, err)
+	}
+}
+
+func TestRevokeUserRefreshToken(t *testing.T) {
+	db := testdb.Open(t)
+	ctx := context.Background()
+	repo := UserRepo{}
+	ana, _ := repo.Create(ctx, db, newUser("ana@mail.com"))
+	eva, _ := repo.Create(ctx, db, newUser("eva@mail.com"))
+	repo.CreateRefreshToken(ctx, db, ana.ID, "hash-ana")
+
+	if ok, err := repo.RevokeUserRefreshToken(ctx, db, eva.ID, "hash-ana"); err != nil || ok {
+		t.Errorf("other user's token: ok = %v, err = %v; want false", ok, err)
+	}
+	if ok, err := repo.RevokeUserRefreshToken(ctx, db, ana.ID, "hash-ana"); err != nil || !ok {
+		t.Errorf("own token: ok = %v, err = %v; want true", ok, err)
+	}
+	if ok, err := repo.RevokeUserRefreshToken(ctx, db, ana.ID, "hash-ana"); err != nil || ok {
+		t.Errorf("already revoked: ok = %v, err = %v; want false", ok, err)
+	}
+}

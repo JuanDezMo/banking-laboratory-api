@@ -2,6 +2,7 @@
 package handler
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -88,4 +89,66 @@ func JSONNotFound(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		next.ServeHTTP(&notFoundRewriter{ResponseWriter: w}, r)
 	})
+}
+
+// ---------------------------------------------------------------------------
+// Autenticación (I-08) y roles
+// ---------------------------------------------------------------------------
+
+// authUserKey es la clave del usuario autenticado en el context. Un tipo propio y sin
+// exportar evita choques con claves de otros paquetes.
+type authUserKey struct{}
+
+// Auth exige un access token válido en "Authorization: Bearer <token>" y guarda el usuario
+// en el context de la petición. Cualquier fallo responde 401 UNAUTHORIZED y no llama a next.
+func (h *Handlers) Auth(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		token, ok := bearerToken(r.Header.Get("Authorization"))
+		if !ok {
+			writeError(w, model.ErrUnauthorized)
+			return
+		}
+		userID, role, err := h.tokens.Validate(token)
+		if err != nil {
+			writeError(w, model.ErrUnauthorized)
+			return
+		}
+		user := model.AuthUser{ID: userID, Role: role}
+		next(w, r.WithContext(context.WithValue(r.Context(), authUserKey{}, user)))
+	}
+}
+
+// bearerToken extrae el token de "Bearer <token>". La palabra Bearer no distingue
+// mayúsculas (I-08).
+func bearerToken(header string) (string, bool) {
+	scheme, token, found := strings.Cut(header, " ")
+	if !found || !strings.EqualFold(scheme, "Bearer") || token == "" {
+		return "", false
+	}
+	return token, true
+}
+
+// currentUser devuelve el usuario que guardó Auth. Solo se usa en handlers protegidos por Auth:
+// si falta, es un error de programación al registrar la ruta.
+func currentUser(r *http.Request) model.AuthUser {
+	user, ok := r.Context().Value(authUserKey{}).(model.AuthUser)
+	if !ok {
+		panic("currentUser: route is not wrapped with Auth")
+	}
+	return user
+}
+
+// requireRole responde 403 FORBIDDEN y devuelve false si el usuario no tiene uno de los
+// roles permitidos. Va después de Auth (401) y antes de leer el cuerpo (spec 6).
+//
+//	user := currentUser(r)
+//	if !requireRole(w, user, model.RoleOperator) { return }
+func requireRole(w http.ResponseWriter, user model.AuthUser, allowed ...model.Role) bool {
+	for _, role := range allowed {
+		if user.Role == role {
+			return true
+		}
+	}
+	writeError(w, model.ErrForbidden)
+	return false
 }

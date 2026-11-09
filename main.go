@@ -71,7 +71,7 @@ func run() error {
 	passwords := service.NewPasswordHasher(runtime.NumCPU()) // un hash argon2 por CPU a la vez
 	tokens := service.NewTokenIssuer(cfg.jwtSecret)
 	authService := service.NewAuthService(db, passwords, tokens)
-	handlers := handler.NewHandlers(authService)
+	handlers := handler.NewHandlers(authService, tokens)
 
 	server := &http.Server{
 		Addr:              listenAddr,

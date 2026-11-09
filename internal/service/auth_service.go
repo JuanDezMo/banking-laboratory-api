@@ -149,3 +149,46 @@ func (s *AuthService) issueTokens(ctx context.Context, db repository.DBTX, userI
 		ExpiresIn:    int(AccessTokenTTL.Seconds()),
 	}, nil
 }
+
+// Refresh entrega un par de tokens nuevo y revoca el refresh token recibido (F-03, RN-26).
+// Revocar el viejo y guardar el nuevo ocurre en una transacción que bloquea la fila del
+// token: si llegan dos peticiones con el mismo token, solo una lo renueva (spec 8).
+func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (TokenPair, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return TokenPair{}, err
+	}
+	defer tx.Rollback()
+
+	// Paso 2: existe, no está revocado ni vencido.
+	current, err := s.users.LockActiveRefreshToken(ctx, tx, hashRefreshToken(refreshToken))
+	if err != nil {
+		return TokenPair{}, err
+	}
+	if current == nil {
+		return TokenPair{}, model.ErrInvalidRefreshToken
+	}
+
+	if err := s.users.RevokeRefreshToken(ctx, tx, current.ID); err != nil {
+		return TokenPair{}, err
+	}
+	// El rol sale de la BD, no del access token anterior.
+	pair, err := s.issueTokens(ctx, tx, current.UserID, current.Role)
+	if err != nil {
+		return TokenPair{}, err
+	}
+	return pair, tx.Commit()
+}
+
+// Logout revoca el refresh token del usuario autenticado (F-04). El token debe estar
+// vigente y ser de ese usuario; si no, ErrInvalidRefreshToken.
+func (s *AuthService) Logout(ctx context.Context, user model.AuthUser, refreshToken string) error {
+	revoked, err := s.users.RevokeUserRefreshToken(ctx, s.db, user.ID, hashRefreshToken(refreshToken))
+	if err != nil {
+		return err
+	}
+	if !revoked {
+		return model.ErrInvalidRefreshToken
+	}
+	return nil
+}

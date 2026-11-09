@@ -45,7 +45,7 @@ Plan para implementar la API del laboratorio bancario en Go, en esta carpeta (`g
 | I0 | ✅ Entorno: BD y API en Docker, proyecto que compila y conecta | 10 | 14 |
 | I1 | ✅ Base común: errores, respuestas, `decodeObject`, validaciones | 12 | 19 |
 | I2 | ✅ Registro y login (F-01, F-02) | 13 | 23 |
-| I3 | Sesión: refresh, auth, logout (F-03, F-04) | 7 | 11 |
+| I3 | ✅ Sesión: refresh, auth, logout (F-03, F-04) | 7 | 11 |
 | I4 | Cuentas (F-05 a F-07) | 7 | 10 |
 | I5 | Recarga con idempotencia (F-08 sin topes) | 10 | 17 |
 | I6 | Transferencias (F-09) | 8 | 13 |
@@ -136,13 +136,13 @@ Plan para implementar la API del laboratorio bancario en Go, en esta carpeta (`g
 
 | ID | Tarea | Est. | Medición |
 |---|---|---|---|
-| T3.1 | `refresh_repo`: buscar por hash con `FOR UPDATE`, revocar, insertar | S | Prueba de integración: un token revocado no se vuelve a encontrar como válido |
-| T3.2 | **F-03** `POST /auth/refresh`: rotación en una transacción | S | `curl`: el refresh devuelve un par nuevo; reutilizar el anterior → `401` |
-| T3.3 | Middleware `Auth`: usuario en el `context` | S | 3 pruebas: sin token → 401; token inválido → 401; válido → el handler lee el usuario |
-| T3.4 | Función `requireRole` | XS | Prueba: `customer` en ruta de `operator` → 403 con el `code` del catálogo |
-| T3.5 | **F-04** `POST /auth/logout` | XS | `curl`: logout → `204`; refresh con ese token → `401` |
-| T3.6 | `seeds/operators.sql` con contraseña hasheada | XS | `psql "$DATABASE_URL" -f seeds/operators.sql`; login del operator → `200` con `role: operator` |
-| T3.7 | Prueba de carrera: dos refresh simultáneos con el mismo token | S | Exactamente uno `200` y uno `401`, 10 ejecuciones seguidas |
+| T3.1 | ✅ `user_repo` (refresh tokens, según `arquitectura-go.md` §3.3): buscar por hash con `FOR UPDATE`, revocar, insertar | S | Prueba de integración: un token revocado no se vuelve a encontrar como válido |
+| T3.2 | ✅ **F-03** `POST /auth/refresh`: rotación en una transacción | S | `curl`: el refresh devuelve un par nuevo; reutilizar el anterior → `401` |
+| T3.3 | ✅ Middleware `Auth`: usuario en el `context` | S | 3 pruebas: sin token → 401; token inválido → 401; válido → el handler lee el usuario |
+| T3.4 | ✅ Función `requireRole` | XS | Prueba: `customer` en ruta de `operator` → 403 con el `code` del catálogo |
+| T3.5 | ✅ **F-04** `POST /auth/logout` | XS | `curl`: logout → `204`; refresh con ese token → `401` |
+| T3.6 | ✅ `seeds/operators.sql` con contraseña hasheada (idempotente) | XS | `psql "$DATABASE_URL" -f seeds/operators.sql` (sin `psql` local: `docker exec -i accounts-api-db psql -U bank -d bank < seeds/operators.sql`); login del operator → `200` con `role: operator` |
+| T3.7 | ✅ Prueba de carrera: dos refresh simultáneos con el mismo token | S | Exactamente uno `200` y uno `401`, 10 ejecuciones seguidas |
 
 **Criterio de salida:** F-03 y F-04 completos; la prueba T3.7 pasa con `go test -race`.
 

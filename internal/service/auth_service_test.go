@@ -167,3 +167,121 @@ func TestLoginRateLimitConcurrent(t *testing.T) {
 		t.Errorf("recorded %d attempts, want exactly %d", attempts, maxFailedLogins)
 	}
 }
+
+// login registra a Ana e inicia sesión; devuelve su usuario y su par de tokens.
+func login(t *testing.T, s *AuthService) (model.User, TokenPair) {
+	t.Helper()
+	ctx := context.Background()
+	user, err := s.Register(ctx, RegisterInput{"Ana", "ana@mail.com", "S3gura2026"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pair, err := s.Login(ctx, LoginInput{"ana@mail.com", "S3gura2026"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return user, pair
+}
+
+// F-03: el refresh entrega un par nuevo y el token usado deja de servir (RN-26).
+func TestRefresh(t *testing.T) {
+	s, _ := newAuthService(t)
+	ctx := context.Background()
+	user, first := login(t, s)
+
+	second, err := s.Refresh(ctx, first.RefreshToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.RefreshToken == first.RefreshToken || second.ExpiresIn != 900 {
+		t.Errorf("second pair = %+v", second)
+	}
+	if userID, role, err := s.tokens.Validate(second.AccessToken); err != nil || userID != user.ID || role != model.RoleCustomer {
+		t.Errorf("new access token: %s %s %v", userID, role, err)
+	}
+
+	// Reusar el token anterior → 401; el nuevo sí funciona.
+	if _, err := s.Refresh(ctx, first.RefreshToken); err != model.ErrInvalidRefreshToken {
+		t.Errorf("reused token: error = %v, want ErrInvalidRefreshToken", err)
+	}
+	if _, err := s.Refresh(ctx, second.RefreshToken); err != nil {
+		t.Errorf("new token: %v", err)
+	}
+}
+
+func TestRefreshInvalidTokens(t *testing.T) {
+	s, db := newAuthService(t)
+	ctx := context.Background()
+	_, pair := login(t, s)
+	db.Exec(`UPDATE refresh_tokens SET expires_at = now() - interval '1 second'`)
+
+	for name, token := range map[string]string{
+		"expired": pair.RefreshToken,
+		"unknown": "no-existe",
+		"empty":   "",
+		"no hash": hashRefreshToken(pair.RefreshToken), // el hash guardado no sirve como token
+	} {
+		if _, err := s.Refresh(ctx, token); err != model.ErrInvalidRefreshToken {
+			t.Errorf("%s: error = %v, want ErrInvalidRefreshToken", name, err)
+		}
+	}
+}
+
+// T3.7: dos refresh simultáneos con el mismo token → exactamente uno gana. 10 rondas.
+func TestRefreshConcurrent(t *testing.T) {
+	s, _ := newAuthService(t)
+	ctx := context.Background()
+	_, pair := login(t, s)
+	token := pair.RefreshToken
+
+	for round := range 10 {
+		results := make(chan TokenPair, 2)
+		errs := make(chan error, 2)
+		var wg sync.WaitGroup
+		for range 2 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				p, err := s.Refresh(ctx, token)
+				if err != nil {
+					errs <- err
+					return
+				}
+				results <- p
+			}()
+		}
+		wg.Wait()
+		close(results)
+		close(errs)
+
+		if len(results) != 1 || len(errs) != 1 {
+			t.Fatalf("round %d: %d successes and %d errors, want 1 and 1", round+1, len(results), len(errs))
+		}
+		if err := <-errs; err != model.ErrInvalidRefreshToken {
+			t.Fatalf("round %d: loser error = %v, want ErrInvalidRefreshToken", round+1, err)
+		}
+		token = (<-results).RefreshToken // la siguiente ronda usa el token ganador
+	}
+}
+
+// F-04: logout revoca el token; solo el dueño puede hacerlo.
+func TestLogout(t *testing.T) {
+	s, _ := newAuthService(t)
+	ctx := context.Background()
+	ana, pair := login(t, s)
+	eva := model.AuthUser{ID: "00000000-0000-4000-8000-000000000000", Role: model.RoleCustomer}
+	anaAuth := model.AuthUser{ID: ana.ID, Role: ana.Role}
+
+	if err := s.Logout(ctx, eva, pair.RefreshToken); err != model.ErrInvalidRefreshToken {
+		t.Errorf("other user: error = %v, want ErrInvalidRefreshToken", err)
+	}
+	if err := s.Logout(ctx, anaAuth, pair.RefreshToken); err != nil {
+		t.Fatalf("own token: %v", err)
+	}
+	if err := s.Logout(ctx, anaAuth, pair.RefreshToken); err != model.ErrInvalidRefreshToken {
+		t.Errorf("second logout: error = %v, want ErrInvalidRefreshToken", err)
+	}
+	if _, err := s.Refresh(ctx, pair.RefreshToken); err != model.ErrInvalidRefreshToken {
+		t.Errorf("refresh after logout: error = %v, want ErrInvalidRefreshToken", err)
+	}
+}

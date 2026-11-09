@@ -18,8 +18,9 @@ const testSecret = "test-secret-with-at-least-32-characters"
 func newTestRouter(t *testing.T) http.Handler {
 	t.Helper()
 	db := testdb.Open(t)
-	auth := service.NewAuthService(db, service.NewPasswordHasher(4), service.NewTokenIssuer(testSecret))
-	return NewRouter(NewHandlers(auth))
+	tokens := service.NewTokenIssuer(testSecret)
+	auth := service.NewAuthService(db, service.NewPasswordHasher(4), tokens)
+	return NewRouter(NewHandlers(auth, tokens))
 }
 
 // do envía una petición JSON al router y devuelve la respuesta.
@@ -122,4 +123,94 @@ func TestAuthRoutesMethodNotAllowed(t *testing.T) {
 		t.Errorf("status = %d, want 405", rec.Code)
 	}
 	assertErrorBody(t, rec, "METHOD_NOT_ALLOWED", "Method not allowed")
+}
+
+// loginPair registra y hace login de Ana; devuelve el par de tokens del JSON.
+func loginPair(t *testing.T, router http.Handler) (access, refresh string) {
+	t.Helper()
+	do(router, http.MethodPost, "/auth/register", `{"name":"Ana","email":"ana@mail.com","password":"S3gura2026"}`)
+	rec := do(router, http.MethodPost, "/auth/login", `{"email":"ana@mail.com","password":"S3gura2026"}`)
+	var pair struct{ AccessToken, RefreshToken string }
+	if err := json.Unmarshal(rec.Body.Bytes(), &pair); err != nil || rec.Code != http.StatusOK {
+		t.Fatalf("login: status = %d, body = %s", rec.Code, rec.Body)
+	}
+	return pair.AccessToken, pair.RefreshToken
+}
+
+// doAuth es como do, con "Authorization: Bearer <access>".
+func doAuth(router http.Handler, method, path, access, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+access)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	return rec
+}
+
+func TestRefreshEndpoint(t *testing.T) {
+	router := newTestRouter(t)
+	_, refresh := loginPair(t, router)
+
+	rec := do(router, http.MethodPost, "/auth/refresh", `{"refreshToken":"`+refresh+`"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body)
+	}
+	var pair map[string]any
+	json.Unmarshal(rec.Body.Bytes(), &pair)
+	if len(pair) != 4 || pair["tokenType"] != "Bearer" || pair["expiresIn"] != float64(900) ||
+		pair["refreshToken"] == refresh || pair["refreshToken"] == "" {
+		t.Errorf("body = %s", rec.Body)
+	}
+
+	// Reusar el token anterior → 401.
+	rec = do(router, http.MethodPost, "/auth/refresh", `{"refreshToken":"`+refresh+`"}`)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("reused token: status = %d, want 401", rec.Code)
+	}
+	assertErrorBody(t, rec, "INVALID_REFRESH_TOKEN", "Invalid refresh token")
+
+	// Paso 1: cuerpo inválido → 400.
+	for _, body := range []string{`{}`, `{"refreshToken":null}`, `{"refreshToken":1}`, `[]`} {
+		rec = do(router, http.MethodPost, "/auth/refresh", body)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: status = %d, want 400", body, rec.Code)
+		}
+		assertErrorBody(t, rec, "BAD_REQUEST", "Invalid request body")
+	}
+}
+
+func TestLogoutEndpoint(t *testing.T) {
+	router := newTestRouter(t)
+	access, refresh := loginPair(t, router)
+	body := `{"refreshToken":"` + refresh + `"}`
+
+	// Paso 1: sin access token → 401 UNAUTHORIZED, aunque el cuerpo sea inválido.
+	rec := do(router, http.MethodPost, "/auth/logout", `no es json`)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("no token: status = %d, want 401", rec.Code)
+	}
+	assertErrorBody(t, rec, "UNAUTHORIZED", "Missing or invalid token")
+
+	// Paso 2: cuerpo inválido → 400.
+	rec = doAuth(router, http.MethodPost, "/auth/logout", access, `{"token":"x"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("invalid body: status = %d, want 400", rec.Code)
+	}
+
+	// Logout correcto → 204 sin cuerpo.
+	rec = doAuth(router, http.MethodPost, "/auth/logout", access, body)
+	if rec.Code != http.StatusNoContent || rec.Body.Len() != 0 {
+		t.Fatalf("logout: status = %d, body = %q; want 204 without body", rec.Code, rec.Body)
+	}
+
+	// Paso 3: el token ya no está vigente → 401 en logout y en refresh.
+	rec = doAuth(router, http.MethodPost, "/auth/logout", access, body)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("second logout: status = %d, want 401", rec.Code)
+	}
+	assertErrorBody(t, rec, "INVALID_REFRESH_TOKEN", "Invalid refresh token")
+	rec = do(router, http.MethodPost, "/auth/refresh", body)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("refresh after logout: status = %d, want 401", rec.Code)
+	}
 }

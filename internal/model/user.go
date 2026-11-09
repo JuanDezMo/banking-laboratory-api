@@ -20,3 +20,9 @@ type User struct {
 	Role         Role
 	CreatedAt    time.Time
 }
+
+// AuthUser es el usuario autenticado de una petición, tomado del access token.
+type AuthUser struct {
+	ID   string
+	Role Role
+}
